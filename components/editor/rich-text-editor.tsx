@@ -61,15 +61,16 @@ export function RichTextEditor({
 
   // Update resize handles position when image is selected
   const updateResizeHandles = useCallback((img: HTMLImageElement) => {
-    const editorEl = editorContainerRef.current?.querySelector('.ql-editor')
-    if (!editorEl) return
+    const container = editorContainerRef.current
+    if (!container) return
 
     const imgRect = img.getBoundingClientRect()
-    const editorRect = editorEl.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
 
+    // Position relative to the wrapper container (which has position: relative)
     setResizeHandles({
-      top: imgRect.top - editorRect.top + editorEl.scrollTop,
-      left: imgRect.left - editorRect.left + editorEl.scrollLeft,
+      top: imgRect.top - containerRect.top,
+      left: imgRect.left - containerRect.left,
       width: imgRect.width,
       height: imgRect.height,
     })
@@ -92,7 +93,7 @@ export function RichTextEditor({
         e.preventDefault()
         const img = target as HTMLImageElement
         setSelectedImage(img)
-        aspectRatio.current = img.naturalWidth / img.naturalHeight
+        aspectRatio.current = img.naturalWidth / img.naturalHeight || 1
         updateResizeHandles(img)
       } else if (!target.closest('.image-resize-controls')) {
         setSelectedImage(null)
@@ -107,6 +108,28 @@ export function RichTextEditor({
       container.removeEventListener('click', handleClick)
     }
   }, [isMounted, updateResizeHandles])
+
+  // Update resize handles on scroll/resize
+  useEffect(() => {
+    if (!selectedImage) return
+
+    const handleScrollOrResize = () => {
+      if (selectedImage && document.body.contains(selectedImage)) {
+        updateResizeHandles(selectedImage)
+      } else {
+        setSelectedImage(null)
+        setResizeHandles(null)
+      }
+    }
+
+    window.addEventListener('scroll', handleScrollOrResize, true)
+    window.addEventListener('resize', handleScrollOrResize)
+
+    return () => {
+      window.removeEventListener('scroll', handleScrollOrResize, true)
+      window.removeEventListener('resize', handleScrollOrResize)
+    }
+  }, [selectedImage, updateResizeHandles])
 
   // Handle resize
   const handleResizeStart = useCallback((e: React.MouseEvent, direction: string) => {
@@ -166,16 +189,23 @@ export function RichTextEditor({
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
 
-      // Trigger onChange to save
-      if (globalEditorInstance) {
-        const html = globalEditorInstance.root?.innerHTML || ''
-        onChange(html)
+      // Update handles position after resize completes
+      if (selectedImage) {
+        updateResizeHandles(selectedImage)
       }
+
+      // Trigger onChange to save - use setTimeout to let DOM settle
+      setTimeout(() => {
+        if (globalEditorInstance && globalEditorInstance.root) {
+          const html = globalEditorInstance.root.innerHTML || ''
+          onChange(html)
+        }
+      }, 10)
     }
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [selectedImage, resizeHandles, onChange])
+  }, [selectedImage, resizeHandles, onChange, updateResizeHandles])
 
   // Image handler for uploading images
   const imageHandler = useCallback(() => {
