@@ -1,0 +1,565 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// TENANT MASTER
+// ============================================
+model Organization {
+  id               Int      @id @default(autoincrement())
+  name             String   @db.VarChar(255)
+  domain           String?  @unique @db.VarChar(100)
+  subdomain        String   @unique @db.VarChar(50)
+  status           OrgStatus @default(ACTIVE)
+  subscriptionPlan SubscriptionPlan @default(STARTER)
+  maxUsers         Int      @default(10)
+  maxPatients      Int      @default(50)
+  features         Json     @default("{\"aiReviewer\": false, \"trainingModule\": false}")
+  settings         Json     @default("{}")
+  billingEmail     String?  @db.VarChar(255)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  users            OrganizationUser[]
+  patients         Patient[]
+  treatmentPlans   TreatmentPlan[]
+  templates        Template[]
+  trainingModules  TrainingModule[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  aiReviews        AIReview[]
+
+  @@index([domain])
+  @@index([subdomain])
+  @@index([status])
+  @@map("organizations")
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum SubscriptionPlan {
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+// ============================================
+// USERS & AUTH
+// ============================================
+model User {
+  id                      Int       @id @default(autoincrement())
+  email                   String    @unique @db.VarChar(255)
+  passwordHash            String    @db.VarChar(255)
+  firstName               String    @db.VarChar(100)
+  lastName                String    @db.VarChar(100)
+  phone                   String?   @db.VarChar(20)
+  profileImagePath        String?   @db.VarChar(500)
+  status                  UserStatus @default(ACTIVE)
+  isIndependentClinician  Boolean   @default(false)
+  emailVerified           Boolean   @default(false)
+  emailVerificationToken  String?   @db.VarChar(255)
+  passwordResetToken      String?   @db.VarChar(255)
+  passwordResetExpires    DateTime?
+  lastLogin               DateTime?
+  lastActivity            DateTime?
+  failedLoginAttempts     Int       @default(0)
+  lockedUntil             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  deletedAt               DateTime?
+
+  // Relations
+  organizations           OrganizationUser[]
+  patientsCreated         Patient[] @relation("PatientCreator")
+  patientsAsBCBA          Patient[] @relation("AssignedBCBA")
+  patientsAsRBT           Patient[] @relation("AssignedRBT")
+  treatmentPlansCreated   TreatmentPlan[] @relation("PlanCreator")
+  treatmentPlansReviewed  TreatmentPlan[] @relation("PlanReviewer")
+  treatmentPlansApproved  TreatmentPlan[] @relation("PlanApprover")
+  comments                Comment[]
+  templatesCreated        Template[]
+  notifications           Notification[]
+  auditLogs               AuditLog[]
+  aiReviews               AIReview[]
+  trainingCompletions     UserTrainingCompletion[]
+  invitedUsers            OrganizationUser[] @relation("InvitedBy")
+
+  @@index([email])
+  @@index([status])
+  @@map("users")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model OrganizationUser {
+  id             Int      @id @default(autoincrement())
+  organizationId Int
+  userId         Int
+  role           UserRole
+  permissions    Json     @default("{}")
+  invitedById    Int?
+  invitedAt      DateTime?
+  joinedAt       DateTime?
+  status         OrgUserStatus @default(PENDING_INVITE)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy      User?        @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, status])
+  @@index([userId])
+  @@index([role])
+  @@map("organization_users")
+}
+
+enum UserRole {
+  ORG_ADMIN
+  CLINICAL_DIRECTOR
+  BCBA
+  RBT
+  BT
+  HR_MANAGER
+}
+
+enum OrgUserStatus {
+  PENDING_INVITE
+  ACTIVE
+  INACTIVE
+}
+
+// ============================================
+// PATIENTS (PHI - ENCRYPTED)
+// ============================================
+model Patient {
+  id                        Int       @id @default(autoincrement())
+  organizationId            Int
+
+  // ENCRYPTED PHI FIELDS (stored as base64 TEXT)
+  firstNameEncrypted        String    @db.Text
+  lastNameEncrypted         String    @db.Text
+  dateOfBirthEncrypted      String    @db.Text
+  ssnEncrypted              String?   @db.Text
+  addressEncrypted          String?   @db.Text
+  parentGuardianEncrypted   String?   @db.Text
+  phoneEncrypted            String?   @db.Text
+  emailEncrypted            String?   @db.Text
+  emergencyContactEncrypted String?   @db.Text
+  insuranceInfoEncrypted    String?   @db.Text
+
+  // Non-PHI
+  patientCode               String    @unique @db.VarChar(50)
+  diagnosis                 Json      @default("{}")
+  allergies                 String[]  @default([])
+  medications               Json      @default("[]")
+  status                    PatientStatus @default(ACTIVE)
+  assignedBCBAId            Int?
+  assignedRBTId             Int?
+  enrollmentDate            DateTime?
+  dischargeDate             DateTime?
+  consentForms              Json      @default("[]")
+
+  createdById               Int
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  deletedAt                 DateTime?
+
+  // Relations
+  organization              Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy                 User         @relation("PatientCreator", fields: [createdById], references: [id])
+  assignedBCBA              User?        @relation("AssignedBCBA", fields: [assignedBCBAId], references: [id])
+  assignedRBT               User?        @relation("AssignedRBT", fields: [assignedRBTId], references: [id])
+  treatmentPlans            TreatmentPlan[]
+
+  @@index([organizationId, status])
+  @@index([patientCode])
+  @@index([assignedBCBAId])
+  @@index([assignedRBTId])
+  @@map("patients")
+}
+
+enum PatientStatus {
+  ACTIVE
+  INACTIVE
+  DISCHARGED
+  ON_HOLD
+}
+
+// ============================================
+// TREATMENT PLANS (CORE CLINICAL DOCUMENT)
+// ============================================
+model TreatmentPlan {
+  id                      Int       @id @default(autoincrement())
+  organizationId          Int
+  patientId               Int
+
+  // Versioning
+  version                 Int       @default(1)
+  parentVersionId         Int?
+
+  // Plan Content (JSONB)
+  title                   String    @db.VarChar(255)
+  goals                   Json      @default("[]")
+  behaviors               Json      @default("[]")
+  interventions           Json      @default("[]")
+  dataCollectionMethods   Json      @default("[]")
+  sessionFrequency        String?   @db.VarChar(100)
+  reviewCycle             String?   @db.VarChar(50)
+  additionalNotes         String?   @db.Text
+
+  // Workflow State Machine
+  status                  PlanStatus @default(DRAFT)
+  workflowHistory         Json      @default("[]")
+
+  // Authorship & Approvals
+  createdById             Int
+  reviewedById            Int?
+  approvedById            Int?
+  approvedAt              DateTime?
+  rejectionReason         String?   @db.Text
+
+  // AI Integration
+  aiReviewed              Boolean   @default(false)
+  aiSuggestionsAccepted   Int       @default(0)
+  aiSuggestionsRejected   Int       @default(0)
+
+  // Compliance Dates
+  effectiveDate           DateTime?
+  expiryDate              DateTime?
+  nextReviewDate          DateTime?
+
+  // Document Storage
+  documentPath            String?   @db.VarChar(500)
+
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  deletedAt               DateTime?
+
+  // Relations
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient                 Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  createdBy               User         @relation("PlanCreator", fields: [createdById], references: [id])
+  reviewedBy              User?        @relation("PlanReviewer", fields: [reviewedById], references: [id])
+  approvedBy              User?        @relation("PlanApprover", fields: [approvedById], references: [id])
+  parentVersion           TreatmentPlan? @relation("PlanVersions", fields: [parentVersionId], references: [id])
+  childVersions           TreatmentPlan[] @relation("PlanVersions")
+  aiReviews               AIReview[]
+  comments                Comment[]
+
+  @@unique([patientId, version])
+  @@index([organizationId, status])
+  @@index([patientId])
+  @@index([createdById])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("treatment_plans")
+}
+
+enum PlanStatus {
+  DRAFT
+  PENDING_BCBA_REVIEW
+  PENDING_CLINICAL_DIRECTOR
+  APPROVED
+  ACTIVE
+  ARCHIVED
+  REJECTED
+}
+
+// ============================================
+// AI REVIEWS
+// ============================================
+model AIReview {
+  id                 Int       @id @default(autoincrement())
+  treatmentPlanId    Int
+  organizationId     Int
+
+  aiModel            String    @db.VarChar(100)
+  reviewType         ReviewType
+
+  // Results
+  overallScore       Float?
+  confidenceScore    Float?
+  riskFlags          Json      @default("[]")
+  suggestions        Json      @default("[]")
+  complianceFlags    Json      @default("[]")
+  strengths          Json      @default("[]")
+  overallFeedback    String?   @db.Text
+
+  // Performance
+  reviewDurationMs   Int?
+  promptTokens       Int?
+  completionTokens   Int?
+  totalCost          Float?
+
+  reviewedById       Int
+  reviewedAt         DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+
+  // Relations
+  treatmentPlan      TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reviewedBy         User          @relation(fields: [reviewedById], references: [id])
+
+  @@index([treatmentPlanId])
+  @@index([organizationId])
+  @@index([reviewedAt])
+  @@map("ai_reviews")
+}
+
+enum ReviewType {
+  DRAFT_REVIEW
+  CLINICAL_REVIEW
+  COMPLIANCE_REVIEW
+}
+
+// ============================================
+// COMMENTS
+// ============================================
+model Comment {
+  id                Int       @id @default(autoincrement())
+  treatmentPlanId   Int
+  userId            Int
+  parentCommentId   Int?
+
+  commentText       String    @db.Text
+  isResolved        Boolean   @default(false)
+  resolvedById      Int?
+  resolvedAt        DateTime?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  // Relations
+  treatmentPlan     TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  user              User          @relation(fields: [userId], references: [id])
+  parentComment     Comment?      @relation("CommentReplies", fields: [parentCommentId], references: [id])
+  replies           Comment[]     @relation("CommentReplies")
+
+  @@index([treatmentPlanId])
+  @@index([userId])
+  @@map("comments")
+}
+
+// ============================================
+// TEMPLATES
+// ============================================
+model Template {
+  id               Int       @id @default(autoincrement())
+  organizationId   Int?
+  createdById      Int
+
+  name             String    @db.VarChar(255)
+  description      String?   @db.Text
+  templateType     String    @default("treatment_plan") @db.VarChar(50)
+  templateContent  Json
+
+  isActive         Boolean   @default(true)
+  isPublic         Boolean   @default(false)
+  usageCount       Int       @default(0)
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy        User          @relation(fields: [createdById], references: [id])
+
+  @@index([organizationId, isActive])
+  @@index([isPublic])
+  @@map("templates")
+}
+
+// ============================================
+// TRAINING (Phase 2 - Architect Now)
+// ============================================
+model TrainingModule {
+  id                  Int       @id @default(autoincrement())
+  organizationId      Int?
+
+  title               String    @db.VarChar(255)
+  description         String?   @db.Text
+  moduleType          ModuleType
+  contentUrl          String?   @db.VarChar(500)
+  contentPath         String?   @db.VarChar(500)
+  durationMinutes     Int?
+  passingScore        Int       @default(80)
+  requiredForRoles    UserRole[]
+
+  hasQuiz             Boolean   @default(false)
+  quizQuestions       Json      @default("[]")
+
+  isActive            Boolean   @default(true)
+  orderIndex          Int       @default(0)
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  completions         UserTrainingCompletion[]
+
+  @@index([organizationId, isActive])
+  @@index([moduleType])
+  @@map("training_modules")
+}
+
+enum ModuleType {
+  ORIENTATION
+  RBT_40HR
+  HIP_HEALTH
+  ATCC
+  CONTINUING_ED
+  CUSTOM
+}
+
+model UserTrainingCompletion {
+  id                Int       @id @default(autoincrement())
+  userId            Int
+  trainingModuleId  Int
+  organizationId    Int
+
+  startedAt         DateTime?
+  completedAt       DateTime?
+  score             Float?
+  attempts          Int       @default(1)
+
+  certificatePath   String?   @db.VarChar(500)
+  expiryDate        DateTime?
+
+  status            CompletionStatus @default(NOT_STARTED)
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trainingModule    TrainingModule @relation(fields: [trainingModuleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trainingModuleId, organizationId])
+  @@index([userId, organizationId])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("user_training_completions")
+}
+
+enum CompletionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+model Notification {
+  id                   Int       @id @default(autoincrement())
+  userId               Int
+  organizationId       Int?
+
+  title                String    @db.VarChar(255)
+  message              String?   @db.Text
+  notificationType     NotificationType
+  priority             NotificationPriority @default(NORMAL)
+
+  relatedResourceType  String?   @db.VarChar(50)
+  relatedResourceId    Int?
+
+  isRead               Boolean   @default(false)
+  readAt               DateTime?
+
+  actionUrl            String?   @db.VarChar(500)
+
+  createdAt            DateTime  @default(now())
+
+  // Relations
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization         Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([organizationId])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  TREATMENT_PLAN_REVIEW
+  TREATMENT_PLAN_APPROVED
+  TREATMENT_PLAN_REJECTED
+  CERTIFICATION_EXPIRING
+  PLAN_EXPIRING
+  PATIENT_ASSIGNMENT
+  SYSTEM_ALERT
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// ============================================
+// AUDIT LOGS (HIPAA COMPLIANCE)
+// ============================================
+model AuditLog {
+  id                 Int       @id @default(autoincrement())
+  organizationId     Int?
+  userId             Int?
+
+  action             String    @db.VarChar(100)
+  resourceType       String?   @db.VarChar(50)
+  resourceId         Int?
+
+  ipAddress          String    @db.Inet
+  userAgent          String?   @db.Text
+  requestMethod      String?   @db.VarChar(10)
+  requestPath        String?   @db.VarChar(500)
+  requestBody        Json?
+  responseStatus     Int?
+
+  changes            Json?
+
+  phiAccessed        Boolean   @default(false)
+  consentVerified    Boolean   @default(true)
+
+  responseTimeMs     Int?
+
+  createdAt          DateTime  @default(now())
+
+  // Relations
+  organization       Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User?         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([phiAccessed])
+  @@index([createdAt])
+  @@index([ipAddress])
+  @@map("audit_logs")
+}
