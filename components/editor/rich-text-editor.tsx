@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useMemo, useCallback, useEffect, useState } from 'react'
+import { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import 'react-quill-new/dist/quill.snow.css'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +29,164 @@ const ReactQuill = dynamic(
   }
 )
 
+// Custom Image Resize Overlay Component
+function ImageResizeOverlay({
+  targetImage,
+  onResize,
+  onClose
+}: {
+  targetImage: HTMLImageElement | null
+  onResize: (width: number, height: number) => void
+  onClose: () => void
+}) {
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  const [position, setPosition] = useState({ top: 0, left: 0 })
+  const isResizing = useRef(false)
+  const startPos = useRef({ x: 0, y: 0, width: 0, height: 0 })
+  const aspectRatio = useRef(1)
+
+  useEffect(() => {
+    if (targetImage) {
+      const rect = targetImage.getBoundingClientRect()
+      const containerRect = targetImage.closest('.ql-editor')?.getBoundingClientRect()
+      if (containerRect) {
+        setPosition({
+          top: rect.top - containerRect.top,
+          left: rect.left - containerRect.left,
+        })
+      }
+      setSize({ width: rect.width, height: rect.height })
+      aspectRatio.current = rect.width / rect.height
+    }
+  }, [targetImage])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent, corner: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isResizing.current = true
+    startPos.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: size.width,
+      height: size.height,
+    }
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizing.current) return
+
+      const deltaX = moveEvent.clientX - startPos.current.x
+      const deltaY = moveEvent.clientY - startPos.current.y
+
+      let newWidth = startPos.current.width
+      let newHeight = startPos.current.height
+
+      if (corner.includes('e')) {
+        newWidth = Math.max(50, startPos.current.width + deltaX)
+      }
+      if (corner.includes('w')) {
+        newWidth = Math.max(50, startPos.current.width - deltaX)
+      }
+      if (corner.includes('s')) {
+        newHeight = Math.max(50, startPos.current.height + deltaY)
+      }
+      if (corner.includes('n')) {
+        newHeight = Math.max(50, startPos.current.height - deltaY)
+      }
+
+      // Maintain aspect ratio for corner handles
+      if (corner.length === 2) {
+        newHeight = newWidth / aspectRatio.current
+      }
+
+      setSize({ width: newWidth, height: newHeight })
+    }
+
+    const handleMouseUp = () => {
+      if (isResizing.current) {
+        isResizing.current = false
+        onResize(size.width, size.height)
+      }
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [size, onResize])
+
+  // Apply size changes to the actual image
+  useEffect(() => {
+    if (targetImage && size.width > 0 && size.height > 0) {
+      targetImage.style.width = `${size.width}px`
+      targetImage.style.height = `${size.height}px`
+    }
+  }, [size, targetImage])
+
+  if (!targetImage) return null
+
+  return (
+    <div
+      ref={overlayRef}
+      className="absolute pointer-events-auto z-50"
+      style={{
+        top: position.top,
+        left: position.left,
+        width: size.width,
+        height: size.height,
+      }}
+    >
+      {/* Border */}
+      <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none" />
+
+      {/* Corner handles */}
+      {['nw', 'ne', 'sw', 'se'].map((corner) => (
+        <div
+          key={corner}
+          className={`absolute w-3 h-3 bg-blue-500 border border-white rounded-sm cursor-${corner}-resize`}
+          style={{
+            top: corner.includes('n') ? -6 : 'auto',
+            bottom: corner.includes('s') ? -6 : 'auto',
+            left: corner.includes('w') ? -6 : 'auto',
+            right: corner.includes('e') ? -6 : 'auto',
+          }}
+          onMouseDown={(e) => handleMouseDown(e, corner)}
+        />
+      ))}
+
+      {/* Edge handles */}
+      {['n', 's', 'e', 'w'].map((edge) => (
+        <div
+          key={edge}
+          className={`absolute bg-blue-500 ${
+            edge === 'n' || edge === 's' ? 'w-6 h-2 left-1/2 -translate-x-1/2' : 'h-6 w-2 top-1/2 -translate-y-1/2'
+          } cursor-${edge}-resize rounded-sm`}
+          style={{
+            top: edge === 'n' ? -4 : edge === 's' ? 'auto' : undefined,
+            bottom: edge === 's' ? -4 : undefined,
+            left: edge === 'w' ? -4 : undefined,
+            right: edge === 'e' ? -4 : undefined,
+          }}
+          onMouseDown={(e) => handleMouseDown(e, edge)}
+        />
+      ))}
+
+      {/* Size indicator */}
+      <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-black/75 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+        {Math.round(size.width)} × {Math.round(size.height)}
+      </div>
+
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        className="absolute -top-8 -right-2 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm hover:bg-red-600"
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
 interface RichTextEditorProps {
   content: string
   onChange: (content: string) => void
@@ -48,9 +206,52 @@ export function RichTextEditor({
 }: RichTextEditorProps) {
   const [isMounted, setIsMounted] = useState(false)
   const [editorReady, setEditorReady] = useState(false)
+  const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null)
+  const editorContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setIsMounted(true)
+  }, [])
+
+  // Handle image click for resizing
+  useEffect(() => {
+    if (!isMounted || !editorContainerRef.current) return
+
+    const handleImageClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'IMG' && target.closest('.ql-editor')) {
+        e.preventDefault()
+        e.stopPropagation()
+        setSelectedImage(target as HTMLImageElement)
+      } else if (!target.closest('.image-resize-overlay')) {
+        setSelectedImage(null)
+      }
+    }
+
+    const container = editorContainerRef.current
+    container.addEventListener('click', handleImageClick)
+
+    return () => {
+      container.removeEventListener('click', handleImageClick)
+    }
+  }, [isMounted])
+
+  const handleImageResize = useCallback((width: number, height: number) => {
+    if (selectedImage) {
+      selectedImage.setAttribute('width', String(Math.round(width)))
+      selectedImage.setAttribute('height', String(Math.round(height)))
+      selectedImage.style.width = `${width}px`
+      selectedImage.style.height = `${height}px`
+      // Trigger onChange to save the updated HTML
+      if (globalEditorInstance) {
+        const html = globalEditorInstance.root?.innerHTML || ''
+        onChange(html)
+      }
+    }
+  }, [selectedImage, onChange])
+
+  const handleCloseResize = useCallback(() => {
+    setSelectedImage(null)
   }, [])
 
   // Image handler for uploading images - uses DOM to find editor
@@ -142,7 +343,7 @@ export function RichTextEditor({
   }
 
   return (
-    <div className={cn('rich-text-editor-wrapper', className)}>
+    <div ref={editorContainerRef} className={cn('rich-text-editor-wrapper relative', className)}>
       <ReactQuill
         theme="snow"
         value={content}
@@ -152,6 +353,15 @@ export function RichTextEditor({
         placeholder={placeholder}
         readOnly={!editable}
       />
+      {selectedImage && (
+        <div className="image-resize-overlay">
+          <ImageResizeOverlay
+            targetImage={selectedImage}
+            onResize={handleImageResize}
+            onClose={handleCloseResize}
+          />
+        </div>
+      )}
       <style jsx global>{`
         .rich-text-editor-wrapper .ql-container {
           min-height: 300px;
@@ -289,6 +499,23 @@ export function RichTextEditor({
         .rich-text-editor-wrapper .ql-snow .ql-background .ql-picker-options {
           padding: 8px;
           width: auto;
+        }
+        /* Image resize cursors */
+        .cursor-nw-resize { cursor: nw-resize !important; }
+        .cursor-ne-resize { cursor: ne-resize !important; }
+        .cursor-sw-resize { cursor: sw-resize !important; }
+        .cursor-se-resize { cursor: se-resize !important; }
+        .cursor-n-resize { cursor: n-resize !important; }
+        .cursor-s-resize { cursor: s-resize !important; }
+        .cursor-e-resize { cursor: e-resize !important; }
+        .cursor-w-resize { cursor: w-resize !important; }
+        /* Image selection styling */
+        .rich-text-editor-wrapper .ql-editor img {
+          transition: outline 0.15s ease;
+        }
+        .rich-text-editor-wrapper .ql-editor img.selected {
+          outline: 2px solid #3b82f6;
+          outline-offset: 2px;
         }
       `}</style>
     </div>
