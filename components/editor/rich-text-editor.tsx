@@ -29,164 +29,6 @@ const ReactQuill = dynamic(
   }
 )
 
-// Custom Image Resize Overlay Component
-function ImageResizeOverlay({
-  targetImage,
-  onResize,
-  onClose
-}: {
-  targetImage: HTMLImageElement | null
-  onResize: (width: number, height: number) => void
-  onClose: () => void
-}) {
-  const overlayRef = useRef<HTMLDivElement>(null)
-  const [size, setSize] = useState({ width: 0, height: 0 })
-  const [position, setPosition] = useState({ top: 0, left: 0 })
-  const isResizing = useRef(false)
-  const startPos = useRef({ x: 0, y: 0, width: 0, height: 0 })
-  const aspectRatio = useRef(1)
-
-  useEffect(() => {
-    if (targetImage) {
-      const rect = targetImage.getBoundingClientRect()
-      const containerRect = targetImage.closest('.ql-editor')?.getBoundingClientRect()
-      if (containerRect) {
-        setPosition({
-          top: rect.top - containerRect.top,
-          left: rect.left - containerRect.left,
-        })
-      }
-      setSize({ width: rect.width, height: rect.height })
-      aspectRatio.current = rect.width / rect.height
-    }
-  }, [targetImage])
-
-  const handleMouseDown = useCallback((e: React.MouseEvent, corner: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    isResizing.current = true
-    startPos.current = {
-      x: e.clientX,
-      y: e.clientY,
-      width: size.width,
-      height: size.height,
-    }
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!isResizing.current) return
-
-      const deltaX = moveEvent.clientX - startPos.current.x
-      const deltaY = moveEvent.clientY - startPos.current.y
-
-      let newWidth = startPos.current.width
-      let newHeight = startPos.current.height
-
-      if (corner.includes('e')) {
-        newWidth = Math.max(50, startPos.current.width + deltaX)
-      }
-      if (corner.includes('w')) {
-        newWidth = Math.max(50, startPos.current.width - deltaX)
-      }
-      if (corner.includes('s')) {
-        newHeight = Math.max(50, startPos.current.height + deltaY)
-      }
-      if (corner.includes('n')) {
-        newHeight = Math.max(50, startPos.current.height - deltaY)
-      }
-
-      // Maintain aspect ratio for corner handles
-      if (corner.length === 2) {
-        newHeight = newWidth / aspectRatio.current
-      }
-
-      setSize({ width: newWidth, height: newHeight })
-    }
-
-    const handleMouseUp = () => {
-      if (isResizing.current) {
-        isResizing.current = false
-        onResize(size.width, size.height)
-      }
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [size, onResize])
-
-  // Apply size changes to the actual image
-  useEffect(() => {
-    if (targetImage && size.width > 0 && size.height > 0) {
-      targetImage.style.width = `${size.width}px`
-      targetImage.style.height = `${size.height}px`
-    }
-  }, [size, targetImage])
-
-  if (!targetImage) return null
-
-  return (
-    <div
-      ref={overlayRef}
-      className="absolute pointer-events-auto z-50"
-      style={{
-        top: position.top,
-        left: position.left,
-        width: size.width,
-        height: size.height,
-      }}
-    >
-      {/* Border */}
-      <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none" />
-
-      {/* Corner handles */}
-      {['nw', 'ne', 'sw', 'se'].map((corner) => (
-        <div
-          key={corner}
-          className={`absolute w-3 h-3 bg-blue-500 border border-white rounded-sm cursor-${corner}-resize`}
-          style={{
-            top: corner.includes('n') ? -6 : 'auto',
-            bottom: corner.includes('s') ? -6 : 'auto',
-            left: corner.includes('w') ? -6 : 'auto',
-            right: corner.includes('e') ? -6 : 'auto',
-          }}
-          onMouseDown={(e) => handleMouseDown(e, corner)}
-        />
-      ))}
-
-      {/* Edge handles */}
-      {['n', 's', 'e', 'w'].map((edge) => (
-        <div
-          key={edge}
-          className={`absolute bg-blue-500 ${
-            edge === 'n' || edge === 's' ? 'w-6 h-2 left-1/2 -translate-x-1/2' : 'h-6 w-2 top-1/2 -translate-y-1/2'
-          } cursor-${edge}-resize rounded-sm`}
-          style={{
-            top: edge === 'n' ? -4 : edge === 's' ? 'auto' : undefined,
-            bottom: edge === 's' ? -4 : undefined,
-            left: edge === 'w' ? -4 : undefined,
-            right: edge === 'e' ? -4 : undefined,
-          }}
-          onMouseDown={(e) => handleMouseDown(e, edge)}
-        />
-      ))}
-
-      {/* Size indicator */}
-      <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-black/75 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-        {Math.round(size.width)} × {Math.round(size.height)}
-      </div>
-
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute -top-8 -right-2 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm hover:bg-red-600"
-      >
-        ×
-      </button>
-    </div>
-  )
-}
-
 interface RichTextEditorProps {
   content: string
   onChange: (content: string) => void
@@ -207,54 +49,135 @@ export function RichTextEditor({
   const [isMounted, setIsMounted] = useState(false)
   const [editorReady, setEditorReady] = useState(false)
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null)
+  const [resizeHandles, setResizeHandles] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
   const editorContainerRef = useRef<HTMLDivElement>(null)
+  const isResizing = useRef(false)
+  const resizeStart = useRef({ x: 0, y: 0, width: 0, height: 0 })
+  const aspectRatio = useRef(1)
 
   useEffect(() => {
     setIsMounted(true)
+  }, [])
+
+  // Update resize handles position when image is selected
+  const updateResizeHandles = useCallback((img: HTMLImageElement) => {
+    const editorEl = editorContainerRef.current?.querySelector('.ql-editor')
+    if (!editorEl) return
+
+    const imgRect = img.getBoundingClientRect()
+    const editorRect = editorEl.getBoundingClientRect()
+
+    setResizeHandles({
+      top: imgRect.top - editorRect.top + editorEl.scrollTop,
+      left: imgRect.left - editorRect.left + editorEl.scrollLeft,
+      width: imgRect.width,
+      height: imgRect.height,
+    })
   }, [])
 
   // Handle image click for resizing
   useEffect(() => {
     if (!isMounted || !editorContainerRef.current) return
 
-    const handleImageClick = (e: MouseEvent) => {
+    const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement
+
+      // Check if clicked on resize handle
+      if (target.closest('.resize-handle')) {
+        return
+      }
+
+      // Check if clicked on an image in the editor
       if (target.tagName === 'IMG' && target.closest('.ql-editor')) {
         e.preventDefault()
-        e.stopPropagation()
-        setSelectedImage(target as HTMLImageElement)
-      } else if (!target.closest('.image-resize-overlay')) {
+        const img = target as HTMLImageElement
+        setSelectedImage(img)
+        aspectRatio.current = img.naturalWidth / img.naturalHeight
+        updateResizeHandles(img)
+      } else if (!target.closest('.image-resize-controls')) {
         setSelectedImage(null)
+        setResizeHandles(null)
       }
     }
 
     const container = editorContainerRef.current
-    container.addEventListener('click', handleImageClick)
+    container.addEventListener('click', handleClick)
 
     return () => {
-      container.removeEventListener('click', handleImageClick)
+      container.removeEventListener('click', handleClick)
     }
-  }, [isMounted])
+  }, [isMounted, updateResizeHandles])
 
-  const handleImageResize = useCallback((width: number, height: number) => {
-    if (selectedImage) {
-      selectedImage.setAttribute('width', String(Math.round(width)))
-      selectedImage.setAttribute('height', String(Math.round(height)))
-      selectedImage.style.width = `${width}px`
-      selectedImage.style.height = `${height}px`
-      // Trigger onChange to save the updated HTML
+  // Handle resize
+  const handleResizeStart = useCallback((e: React.MouseEvent, direction: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (!selectedImage || !resizeHandles) return
+
+    isResizing.current = true
+    resizeStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: resizeHandles.width,
+      height: resizeHandles.height,
+    }
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizing.current || !selectedImage) return
+
+      const deltaX = moveEvent.clientX - resizeStart.current.x
+      const deltaY = moveEvent.clientY - resizeStart.current.y
+
+      let newWidth = resizeStart.current.width
+      let newHeight = resizeStart.current.height
+
+      // Calculate new dimensions based on direction
+      if (direction.includes('e')) {
+        newWidth = Math.max(50, resizeStart.current.width + deltaX)
+      }
+      if (direction.includes('w')) {
+        newWidth = Math.max(50, resizeStart.current.width - deltaX)
+      }
+      if (direction.includes('s')) {
+        newHeight = Math.max(50, resizeStart.current.height + deltaY)
+      }
+      if (direction.includes('n')) {
+        newHeight = Math.max(50, resizeStart.current.height - deltaY)
+      }
+
+      // Maintain aspect ratio for corner handles
+      if (direction.length === 2) {
+        newHeight = newWidth / aspectRatio.current
+      }
+
+      // Apply to image
+      selectedImage.style.width = `${newWidth}px`
+      selectedImage.style.height = `${newHeight}px`
+      selectedImage.setAttribute('width', String(Math.round(newWidth)))
+      selectedImage.setAttribute('height', String(Math.round(newHeight)))
+
+      // Update handles position
+      setResizeHandles(prev => prev ? { ...prev, width: newWidth, height: newHeight } : null)
+    }
+
+    const handleMouseUp = () => {
+      isResizing.current = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+
+      // Trigger onChange to save
       if (globalEditorInstance) {
         const html = globalEditorInstance.root?.innerHTML || ''
         onChange(html)
       }
     }
-  }, [selectedImage, onChange])
 
-  const handleCloseResize = useCallback(() => {
-    setSelectedImage(null)
-  }, [])
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [selectedImage, resizeHandles, onChange])
 
-  // Image handler for uploading images - uses DOM to find editor
+  // Image handler for uploading images
   const imageHandler = useCallback(() => {
     const input = document.createElement('input')
     input.setAttribute('type', 'file')
@@ -317,22 +240,69 @@ export function RichTextEditor({
     'image',
   ]
 
-  // Handle content change - Quill returns HTML
+  // Handle content change
   const handleChange = useCallback(
     (value: string, _delta: any, _source: string, editor: any) => {
-      // Store editor reference for external access
       if (editor && !editorReady) {
         globalEditorInstance = editor
         setEditorReady(true)
         onEditorReady?.(editor)
       }
 
-      // Quill returns <p><br></p> for empty content, normalize to empty string
       const isEmpty = value === '<p><br></p>' || value === '<p></p>' || !value
       onChange(isEmpty ? '' : value)
     },
     [onChange, editorReady, onEditorReady]
   )
+
+  // Add tooltips to toolbar buttons after mount
+  useEffect(() => {
+    if (!isMounted || !editorContainerRef.current) return
+
+    const addTooltips = () => {
+      const toolbar = editorContainerRef.current?.querySelector('.ql-toolbar')
+      if (!toolbar) return
+
+      const tooltipMap: Record<string, string> = {
+        '.ql-bold': 'Bold (Ctrl+B)',
+        '.ql-italic': 'Italic (Ctrl+I)',
+        '.ql-underline': 'Underline (Ctrl+U)',
+        '.ql-strike': 'Strikethrough',
+        '.ql-link': 'Insert Link',
+        '.ql-image': 'Insert Image',
+        '.ql-blockquote': 'Block Quote',
+        '.ql-code-block': 'Code Block',
+        '.ql-clean': 'Clear Formatting',
+        '.ql-list[value="ordered"]': 'Numbered List',
+        '.ql-list[value="bullet"]': 'Bullet List',
+        '.ql-align .ql-picker-label': 'Text Alignment',
+        '.ql-color .ql-picker-label': 'Text Color',
+        '.ql-background .ql-picker-label': 'Background Color',
+        '.ql-size .ql-picker-label': 'Font Size',
+      }
+
+      Object.entries(tooltipMap).forEach(([selector, tooltip]) => {
+        const elements = toolbar.querySelectorAll(selector)
+        elements.forEach((el) => {
+          el.setAttribute('title', tooltip)
+        })
+      })
+
+      // Alignment buttons
+      const alignButtons = toolbar.querySelectorAll('.ql-align .ql-picker-item')
+      alignButtons.forEach((btn) => {
+        const value = btn.getAttribute('data-value')
+        if (value === 'center') btn.setAttribute('title', 'Center Align')
+        else if (value === 'right') btn.setAttribute('title', 'Right Align')
+        else if (value === 'justify') btn.setAttribute('title', 'Justify')
+        else btn.setAttribute('title', 'Left Align')
+      })
+    }
+
+    // Wait for toolbar to render
+    const timer = setTimeout(addTooltips, 500)
+    return () => clearTimeout(timer)
+  }, [isMounted, editorReady])
 
   if (!isMounted) {
     return (
@@ -353,24 +323,87 @@ export function RichTextEditor({
         placeholder={placeholder}
         readOnly={!editable}
       />
-      {selectedImage && (
-        <div className="image-resize-overlay">
-          <ImageResizeOverlay
-            targetImage={selectedImage}
-            onResize={handleImageResize}
-            onClose={handleCloseResize}
+
+      {/* Image Resize Handles */}
+      {selectedImage && resizeHandles && (
+        <div
+          className="image-resize-controls absolute pointer-events-none"
+          style={{
+            top: resizeHandles.top,
+            left: resizeHandles.left,
+            width: resizeHandles.width,
+            height: resizeHandles.height,
+            zIndex: 100,
+          }}
+        >
+          {/* Border */}
+          <div className="absolute inset-0 border-2 border-blue-500 rounded" />
+
+          {/* Corner handles */}
+          <div
+            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
+            style={{ top: -6, left: -6, cursor: 'nw-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'nw')}
           />
+          <div
+            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
+            style={{ top: -6, right: -6, cursor: 'ne-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'ne')}
+          />
+          <div
+            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
+            style={{ bottom: -6, left: -6, cursor: 'sw-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'sw')}
+          />
+          <div
+            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
+            style={{ bottom: -6, right: -6, cursor: 'se-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'se')}
+          />
+
+          {/* Edge handles */}
+          <div
+            className="resize-handle absolute w-6 h-2 bg-blue-500 border border-white rounded-sm pointer-events-auto"
+            style={{ top: -4, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'n')}
+          />
+          <div
+            className="resize-handle absolute w-6 h-2 bg-blue-500 border border-white rounded-sm pointer-events-auto"
+            style={{ bottom: -4, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 's')}
+          />
+          <div
+            className="resize-handle absolute w-2 h-6 bg-blue-500 border border-white rounded-sm pointer-events-auto"
+            style={{ left: -4, top: '50%', transform: 'translateY(-50%)', cursor: 'w-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'w')}
+          />
+          <div
+            className="resize-handle absolute w-2 h-6 bg-blue-500 border border-white rounded-sm pointer-events-auto"
+            style={{ right: -4, top: '50%', transform: 'translateY(-50%)', cursor: 'e-resize' }}
+            onMouseDown={(e) => handleResizeStart(e, 'e')}
+          />
+
+          {/* Size indicator */}
+          <div
+            className="absolute bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none whitespace-nowrap"
+            style={{ bottom: -28, left: '50%', transform: 'translateX(-50%)' }}
+          >
+            {Math.round(resizeHandles.width)} × {Math.round(resizeHandles.height)}
+          </div>
         </div>
       )}
+
       <style jsx global>{`
         .rich-text-editor-wrapper .ql-container {
           min-height: 300px;
           font-size: 16px;
           font-family: inherit;
+          position: relative;
         }
         .rich-text-editor-wrapper .ql-editor {
           min-height: 300px;
           padding: 16px;
+          position: relative;
         }
         .rich-text-editor-wrapper .ql-editor.ql-blank::before {
           font-style: normal;
@@ -391,17 +424,19 @@ export function RichTextEditor({
         .rich-text-editor-wrapper .ql-editor img {
           max-width: 100%;
           height: auto;
-          border-radius: 8px;
+          border-radius: 4px;
           margin: 8px 0;
           cursor: pointer;
+          display: inline-block;
         }
         .rich-text-editor-wrapper .ql-editor img:hover {
-          outline: 2px solid #3b82f6;
+          outline: 2px solid #93c5fd;
           outline-offset: 2px;
         }
         .rich-text-editor-wrapper .ql-snow .ql-tooltip {
           z-index: 1000;
         }
+        /* Toolbar button hover and active states */
         .rich-text-editor-wrapper .ql-snow.ql-toolbar button:hover,
         .rich-text-editor-wrapper .ql-snow .ql-toolbar button:hover {
           color: #2563eb;
@@ -500,22 +535,10 @@ export function RichTextEditor({
           padding: 8px;
           width: auto;
         }
-        /* Image resize cursors */
-        .cursor-nw-resize { cursor: nw-resize !important; }
-        .cursor-ne-resize { cursor: ne-resize !important; }
-        .cursor-sw-resize { cursor: sw-resize !important; }
-        .cursor-se-resize { cursor: se-resize !important; }
-        .cursor-n-resize { cursor: n-resize !important; }
-        .cursor-s-resize { cursor: s-resize !important; }
-        .cursor-e-resize { cursor: e-resize !important; }
-        .cursor-w-resize { cursor: w-resize !important; }
-        /* Image selection styling */
-        .rich-text-editor-wrapper .ql-editor img {
-          transition: outline 0.15s ease;
-        }
-        .rich-text-editor-wrapper .ql-editor img.selected {
-          outline: 2px solid #3b82f6;
-          outline-offset: 2px;
+        /* Toolbar tooltips */
+        .rich-text-editor-wrapper .ql-toolbar button[title],
+        .rich-text-editor-wrapper .ql-toolbar .ql-picker-label[title] {
+          position: relative;
         }
       `}</style>
     </div>
