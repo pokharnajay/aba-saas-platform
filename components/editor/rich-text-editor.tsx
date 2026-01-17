@@ -131,6 +131,57 @@ export function RichTextEditor({
     }
   }, [selectedImage, updateResizeHandles])
 
+  // Monitor for image deletion (keyboard delete/backspace or programmatic removal)
+  useEffect(() => {
+    if (!selectedImage || !editorContainerRef.current) return
+
+    const editorEl = editorContainerRef.current.querySelector('.ql-editor')
+    if (!editorEl) return
+
+    // Use MutationObserver to detect when image is removed from DOM
+    const observer = new MutationObserver(() => {
+      if (selectedImage && !document.body.contains(selectedImage)) {
+        setSelectedImage(null)
+        setResizeHandles(null)
+      }
+    })
+
+    observer.observe(editorEl, {
+      childList: true,
+      subtree: true,
+    })
+
+    // Also listen for keyboard events
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedImage) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        // Remove the image from the DOM
+        selectedImage.remove()
+
+        // Clear selection immediately
+        setSelectedImage(null)
+        setResizeHandles(null)
+
+        // Trigger onChange to save the updated content
+        setTimeout(() => {
+          if (globalEditorInstance && globalEditorInstance.root) {
+            const html = globalEditorInstance.root.innerHTML || ''
+            onChange(html)
+          }
+        }, 10)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [selectedImage])
+
   // Handle resize
   const handleResizeStart = useCallback((e: React.MouseEvent, direction: string) => {
     e.preventDefault()
@@ -145,6 +196,10 @@ export function RichTextEditor({
       width: resizeHandles.width,
       height: resizeHandles.height,
     }
+
+    // Prevent text selection during resize
+    document.body.style.userSelect = 'none'
+    document.body.style.webkitUserSelect = 'none'
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       if (!isResizing.current || !selectedImage) return
@@ -174,7 +229,7 @@ export function RichTextEditor({
         newHeight = newWidth / aspectRatio.current
       }
 
-      // Apply to image
+      // Apply to image with smooth transition
       selectedImage.style.width = `${newWidth}px`
       selectedImage.style.height = `${newHeight}px`
       selectedImage.setAttribute('width', String(Math.round(newWidth)))
@@ -188,6 +243,10 @@ export function RichTextEditor({
       isResizing.current = false
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
+
+      // Re-enable text selection
+      document.body.style.userSelect = ''
+      document.body.style.webkitUserSelect = ''
 
       // Update handles position after resize completes
       if (selectedImage) {
@@ -357,7 +416,7 @@ export function RichTextEditor({
       {/* Image Resize Handles */}
       {selectedImage && resizeHandles && (
         <div
-          className="image-resize-controls absolute pointer-events-none"
+          className="image-resize-controls absolute pointer-events-none transition-opacity duration-150"
           style={{
             top: resizeHandles.top,
             left: resizeHandles.left,
@@ -366,59 +425,59 @@ export function RichTextEditor({
             zIndex: 100,
           }}
         >
-          {/* Border */}
-          <div className="absolute inset-0 border-2 border-blue-500 rounded" />
+          {/* Border with subtle shadow */}
+          <div className="absolute inset-0 border-2 border-blue-500 rounded shadow-sm" />
 
-          {/* Corner handles */}
+          {/* Corner handles - larger and smoother like Google Docs */}
           <div
-            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
-            style={{ top: -6, left: -6, cursor: 'nw-resize' }}
+            className="resize-handle absolute w-4 h-4 bg-white border-2 border-blue-500 rounded-full pointer-events-auto hover:scale-125 transition-transform shadow-md"
+            style={{ top: -8, left: -8, cursor: 'nw-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'nw')}
           />
           <div
-            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
-            style={{ top: -6, right: -6, cursor: 'ne-resize' }}
+            className="resize-handle absolute w-4 h-4 bg-white border-2 border-blue-500 rounded-full pointer-events-auto hover:scale-125 transition-transform shadow-md"
+            style={{ top: -8, right: -8, cursor: 'ne-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'ne')}
           />
           <div
-            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
-            style={{ bottom: -6, left: -6, cursor: 'sw-resize' }}
+            className="resize-handle absolute w-4 h-4 bg-white border-2 border-blue-500 rounded-full pointer-events-auto hover:scale-125 transition-transform shadow-md"
+            style={{ bottom: -8, left: -8, cursor: 'sw-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'sw')}
           />
           <div
-            className="resize-handle absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
-            style={{ bottom: -6, right: -6, cursor: 'se-resize' }}
+            className="resize-handle absolute w-4 h-4 bg-white border-2 border-blue-500 rounded-full pointer-events-auto hover:scale-125 transition-transform shadow-md"
+            style={{ bottom: -8, right: -8, cursor: 'se-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'se')}
           />
 
-          {/* Edge handles */}
+          {/* Edge handles - invisible but larger click area like Google Docs */}
           <div
-            className="resize-handle absolute w-6 h-2 bg-blue-500 border border-white rounded-sm pointer-events-auto"
-            style={{ top: -4, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' }}
+            className="resize-handle absolute h-3 pointer-events-auto hover:bg-blue-500/10 transition-colors"
+            style={{ top: -6, left: 16, right: 16, cursor: 'n-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'n')}
           />
           <div
-            className="resize-handle absolute w-6 h-2 bg-blue-500 border border-white rounded-sm pointer-events-auto"
-            style={{ bottom: -4, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' }}
+            className="resize-handle absolute h-3 pointer-events-auto hover:bg-blue-500/10 transition-colors"
+            style={{ bottom: -6, left: 16, right: 16, cursor: 's-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 's')}
           />
           <div
-            className="resize-handle absolute w-2 h-6 bg-blue-500 border border-white rounded-sm pointer-events-auto"
-            style={{ left: -4, top: '50%', transform: 'translateY(-50%)', cursor: 'w-resize' }}
+            className="resize-handle absolute w-3 pointer-events-auto hover:bg-blue-500/10 transition-colors"
+            style={{ left: -6, top: 16, bottom: 16, cursor: 'w-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'w')}
           />
           <div
-            className="resize-handle absolute w-2 h-6 bg-blue-500 border border-white rounded-sm pointer-events-auto"
-            style={{ right: -4, top: '50%', transform: 'translateY(-50%)', cursor: 'e-resize' }}
+            className="resize-handle absolute w-3 pointer-events-auto hover:bg-blue-500/10 transition-colors"
+            style={{ right: -6, top: 16, bottom: 16, cursor: 'e-resize' }}
             onMouseDown={(e) => handleResizeStart(e, 'e')}
           />
 
-          {/* Size indicator */}
+          {/* Size indicator with smooth animation */}
           <div
-            className="absolute bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none whitespace-nowrap"
-            style={{ bottom: -28, left: '50%', transform: 'translateX(-50%)' }}
+            className="absolute bg-blue-600 text-white text-xs px-2.5 py-1 rounded-md pointer-events-none whitespace-nowrap shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200"
+            style={{ bottom: -32, left: '50%', transform: 'translateX(-50%)' }}
           >
-            {Math.round(resizeHandles.width)} × {Math.round(resizeHandles.height)}
+            {Math.round(resizeHandles.width)} × {Math.round(resizeHandles.height)} px
           </div>
         </div>
       )}
@@ -454,14 +513,16 @@ export function RichTextEditor({
         .rich-text-editor-wrapper .ql-editor img {
           max-width: 100%;
           height: auto;
-          border-radius: 4px;
+          border-radius: 6px;
           margin: 8px 0;
           cursor: pointer;
           display: inline-block;
+          transition: all 0.2s ease;
+          box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
         }
         .rich-text-editor-wrapper .ql-editor img:hover {
-          outline: 2px solid #93c5fd;
-          outline-offset: 2px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+          transform: scale(1.005);
         }
         .rich-text-editor-wrapper .ql-snow .ql-tooltip {
           z-index: 1000;
