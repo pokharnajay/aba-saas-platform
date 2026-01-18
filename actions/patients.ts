@@ -185,8 +185,19 @@ export async function getPatient(id: number) {
         },
       },
       treatmentPlans: {
+        where: {
+          deletedAt: null,
+        },
         orderBy: { createdAt: 'desc' },
-        take: 5,
+        include: {
+          createdBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
       },
     },
   })

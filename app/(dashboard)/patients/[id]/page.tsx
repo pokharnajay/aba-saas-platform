@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Edit, FileText } from 'lucide-react'
-import { canEditPatient, canCreateTreatmentPlan } from '@/lib/auth/permissions'
+import { canEditPatient, canCreateTreatmentPlan, getCurrentRole } from '@/lib/auth/permissions'
+import { SessionNotesList } from '@/components/session-notes/session-notes-list'
 
 export default async function PatientDetailPage({
   params,
@@ -29,6 +30,8 @@ export default async function PatientDetailPage({
     const patient = await getPatient(patientId) as any
     const canEdit = canEditPatient(session, patient)
     const canCreatePlan = canCreateTreatmentPlan(session)
+    const userRole = getCurrentRole(session)
+    const canCreateSessionNote = ['RBT', 'BT', 'BCBA', 'CLINICAL_DIRECTOR'].includes(userRole || '')
 
     return (
       <div className="max-w-6xl mx-auto space-y-6">
@@ -241,9 +244,70 @@ export default async function PatientDetailPage({
           </CardContent>
         </Card>
 
+        {/* Current Treatment Plan */}
+        {(() => {
+          const activePlan = patient.treatmentPlans?.find((p: any) => p.status === 'ACTIVE')
+          return activePlan ? (
+            <Card className="border-green-200 bg-green-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
+                  Current Treatment Plan
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Link
+                  href={`/treatment-plans/${activePlan.id}`}
+                  className="block p-4 bg-white border border-green-300 rounded-lg hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className="font-semibold text-lg text-gray-900">{activePlan.title}</p>
+                      <div className="mt-2 space-y-1">
+                        <p className="text-sm text-gray-600">
+                          <span className="font-medium">Created by:</span>{' '}
+                          {activePlan.createdBy
+                            ? `${activePlan.createdBy.firstName} ${activePlan.createdBy.lastName}`
+                            : 'Unknown'}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          <span className="font-medium">Version:</span> {activePlan.version} •{' '}
+                          <span className="font-medium">Started:</span>{' '}
+                          {new Date(activePlan.createdAt).toLocaleDateString()}
+                        </p>
+                        {activePlan.sessionFrequency && (
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">Frequency:</span> {activePlan.sessionFrequency}
+                          </p>
+                        )}
+                        {activePlan.reviewCycle && (
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">Review Cycle:</span> {activePlan.reviewCycle}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-600 text-white">
+                        ACTIVE
+                      </span>
+                      {activePlan.aiReviewed && (
+                        <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                          AI Reviewed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              </CardContent>
+            </Card>
+          ) : null
+        })()}
+
+        {/* Treatment Plan History */}
         <Card>
           <CardHeader>
-            <CardTitle>Treatment Plans</CardTitle>
+            <CardTitle>Treatment Plan History</CardTitle>
           </CardHeader>
           <CardContent>
             {patient.treatmentPlans && patient.treatmentPlans.length > 0 ? (
@@ -252,28 +316,41 @@ export default async function PatientDetailPage({
                   <Link
                     key={plan.id}
                     href={`/treatment-plans/${plan.id}`}
-                    className="block p-3 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                    className={`block p-3 border rounded-md hover:bg-gray-50 transition-colors ${
+                      plan.status === 'ACTIVE'
+                        ? 'border-green-300 bg-green-50/50'
+                        : 'border-gray-200'
+                    }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div>
+                      <div className="flex-1">
                         <p className="font-medium">{plan.title}</p>
                         <p className="text-sm text-gray-500">
                           Version {plan.version} •{' '}
                           {new Date(plan.createdAt).toLocaleDateString()}
+                          {plan.createdBy && (
+                            <> • by {plan.createdBy.firstName} {plan.createdBy.lastName}</>
+                          )}
                         </p>
                       </div>
                       <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
+                        className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ml-3 ${
                           plan.status === 'ACTIVE'
                             ? 'bg-green-100 text-green-800'
                             : plan.status === 'APPROVED'
                             ? 'bg-blue-100 text-blue-800'
                             : plan.status === 'DRAFT'
                             ? 'bg-gray-100 text-gray-800'
-                            : 'bg-yellow-100 text-yellow-800'
+                            : plan.status === 'PENDING_BCBA_REVIEW'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : plan.status === 'PENDING_CLINICAL_DIRECTOR'
+                            ? 'bg-orange-100 text-orange-800'
+                            : plan.status === 'INACTIVE'
+                            ? 'bg-slate-100 text-slate-600'
+                            : 'bg-purple-100 text-purple-800'
                         }`}
                       >
-                        {plan.status}
+                        {plan.status.replace(/_/g, ' ')}
                       </span>
                     </div>
                   </Link>
@@ -291,6 +368,9 @@ export default async function PatientDetailPage({
             )}
           </CardContent>
         </Card>
+
+        {/* Session Notes Section */}
+        <SessionNotesList patientId={patient.id} canCreate={canCreateSessionNote} />
       </div>
     )
   } catch (error: any) {

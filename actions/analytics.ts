@@ -263,9 +263,7 @@ export async function getAIReviewStats(dateRange?: { start?: Date; end?: Date })
       patient: {
         organizationId: currentOrgId,
       },
-      aiReviewResult: {
-        not: null,
-      },
+      aiReviewed: true,
     }
 
     if (dateRange?.start || dateRange?.end) {

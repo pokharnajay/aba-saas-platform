@@ -36,6 +36,8 @@ interface RichTextEditorProps {
   className?: string
   editable?: boolean
   onEditorReady?: (editor: any) => void
+  onAIReview?: () => void
+  isAIReviewLoading?: boolean
 }
 
 export function RichTextEditor({
@@ -45,6 +47,8 @@ export function RichTextEditor({
   className,
   editable = true,
   onEditorReady,
+  onAIReview,
+  isAIReviewLoading = false,
 }: RichTextEditorProps) {
   const [isMounted, setIsMounted] = useState(false)
   const [editorReady, setEditorReady] = useState(false)
@@ -289,6 +293,13 @@ export function RichTextEditor({
     }
   }, [])
 
+  // AI Review handler
+  const aiReviewHandler = useCallback(() => {
+    if (onAIReview) {
+      onAIReview()
+    }
+  }, [onAIReview])
+
   const modules = useMemo(
     () => ({
       toolbar: {
@@ -301,16 +312,18 @@ export function RichTextEditor({
           ['blockquote', 'code-block'],
           ['link', 'image'],
           ['clean'],
+          ...(onAIReview ? [['ai-review']] : []),
         ],
         handlers: {
           image: imageHandler,
+          'ai-review': aiReviewHandler,
         },
       },
       clipboard: {
         matchVisual: false,
       },
     }),
-    [imageHandler]
+    [imageHandler, aiReviewHandler, onAIReview]
   )
 
   const formats = [
@@ -344,11 +357,11 @@ export function RichTextEditor({
     [onChange, editorReady, onEditorReady]
   )
 
-  // Add tooltips to toolbar buttons after mount
+  // Add tooltips to toolbar buttons and customize AI button after mount
   useEffect(() => {
     if (!isMounted || !editorContainerRef.current) return
 
-    const addTooltips = () => {
+    const addTooltipsAndCustomizeAI = () => {
       const toolbar = editorContainerRef.current?.querySelector('.ql-toolbar')
       if (!toolbar) return
 
@@ -368,6 +381,7 @@ export function RichTextEditor({
         '.ql-color .ql-picker-label': 'Text Color',
         '.ql-background .ql-picker-label': 'Background Color',
         '.ql-size .ql-picker-label': 'Font Size',
+        '.ql-ai-review': 'AI Review',
       }
 
       Object.entries(tooltipMap).forEach(([selector, tooltip]) => {
@@ -386,12 +400,28 @@ export function RichTextEditor({
         else if (value === 'justify') btn.setAttribute('title', 'Justify')
         else btn.setAttribute('title', 'Left Align')
       })
+
+      // Customize AI Review button with sparkle icon
+      const aiButton = toolbar.querySelector('.ql-ai-review')
+      if (aiButton) {
+        aiButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+            <path d="M19 15L19.75 17.25L22 18L19.75 18.75L19 21L18.25 18.75L16 18L18.25 17.25L19 15Z"/>
+          </svg>
+        `
+        if (isAIReviewLoading) {
+          aiButton.classList.add('ai-loading')
+        } else {
+          aiButton.classList.remove('ai-loading')
+        }
+      }
     }
 
     // Wait for toolbar to render
-    const timer = setTimeout(addTooltips, 500)
+    const timer = setTimeout(addTooltipsAndCustomizeAI, 500)
     return () => clearTimeout(timer)
-  }, [isMounted, editorReady])
+  }, [isMounted, editorReady, isAIReviewLoading])
 
   if (!isMounted) {
     return (
@@ -630,6 +660,30 @@ export function RichTextEditor({
         .rich-text-editor-wrapper .ql-toolbar button[title],
         .rich-text-editor-wrapper .ql-toolbar .ql-picker-label[title] {
           position: relative;
+        }
+        /* AI Review button styling */
+        .rich-text-editor-wrapper .ql-snow .ql-toolbar button.ql-ai-review {
+          width: auto;
+          padding: 0 8px;
+        }
+        .rich-text-editor-wrapper .ql-snow .ql-toolbar button.ql-ai-review svg {
+          width: 18px;
+          height: 18px;
+          color: #8b5cf6;
+        }
+        .rich-text-editor-wrapper .ql-snow .ql-toolbar button.ql-ai-review:hover svg {
+          color: #7c3aed;
+        }
+        .rich-text-editor-wrapper .ql-snow .ql-toolbar button.ql-ai-review.ai-loading svg {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
         }
       `}</style>
     </div>

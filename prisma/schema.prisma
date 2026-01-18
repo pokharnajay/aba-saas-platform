@@ -36,6 +36,7 @@ model Organization {
   notifications    Notification[]
   auditLogs        AuditLog[]
   aiReviews        AIReview[]
+  sessionNotes     SessionNote[]
 
   @@index([domain])
   @@index([subdomain])
@@ -96,6 +97,7 @@ model User {
   aiReviews               AIReview[]
   trainingCompletions     UserTrainingCompletion[]
   invitedUsers            OrganizationUser[] @relation("InvitedBy")
+  sessionNotesCreated     SessionNote[]
 
   @@index([email])
   @@index([status])
@@ -190,6 +192,7 @@ model Patient {
   assignedBCBA              User?        @relation("AssignedBCBA", fields: [assignedBCBAId], references: [id])
   assignedRBT               User?        @relation("AssignedRBT", fields: [assignedRBTId], references: [id])
   treatmentPlans            TreatmentPlan[]
+  sessionNotes              SessionNote[]
 
   @@index([organizationId, status])
   @@index([patientCode])
@@ -265,6 +268,7 @@ model TreatmentPlan {
   childVersions           TreatmentPlan[] @relation("PlanVersions")
   aiReviews               AIReview[]
   comments                Comment[]
+  sessionNotes            SessionNote[]
 
   @@unique([patientId, version])
   @@index([organizationId, status])
@@ -562,4 +566,68 @@ model AuditLog {
   @@index([createdAt])
   @@index([ipAddress])
   @@map("audit_logs")
+}
+
+// ============================================
+// SESSION NOTES (THERAPY TRACKING)
+// ============================================
+model SessionNote {
+  id                  Int       @id @default(autoincrement())
+  organizationId      Int
+  patientId           Int
+  treatmentPlanId     Int?
+
+  // Session Details
+  sessionType         SessionType @default(THERAPY)
+  sessionStatus       SessionStatus @default(COMPLETED)
+  sessionDate         DateTime
+  sessionDuration     Int?       // in minutes
+
+  // Session Content
+  sessionNotes        String?    @db.Text
+  goalProgress        Json       @default("[]")
+  behaviorsObserved   Json       @default("[]")
+  interventionsUsed   Json       @default("[]")
+  dataCollected       Json       @default("[]")
+  parentFeedback      String?    @db.Text
+  nextSessionPlan     String?    @db.Text
+
+  // Signature & Compliance
+  staffSignature      String?    @db.VarChar(255)
+  signedAt            DateTime?
+
+  createdById         Int
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  deletedAt           DateTime?
+
+  // Relations
+  organization        Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient             Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatmentPlan       TreatmentPlan? @relation(fields: [treatmentPlanId], references: [id], onDelete: SetNull)
+  createdBy           User          @relation(fields: [createdById], references: [id])
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([treatmentPlanId])
+  @@index([createdById])
+  @@index([sessionDate])
+  @@index([sessionStatus])
+  @@map("session_notes")
+}
+
+enum SessionType {
+  THERAPY
+  ASSESSMENT
+  PARENT_TRAINING
+  CONSULTATION
+  OTHER
+}
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
 }

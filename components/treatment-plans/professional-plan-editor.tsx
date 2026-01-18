@@ -125,7 +125,7 @@ export function ProfessionalPlanEditor({
   // Request AI Review
   const handleRequestAIReview = async () => {
     if (!initialData?.id) {
-      setError('Please save the treatment plan first before requesting AI review')
+      setError('You need to save plan once to start AI Review')
       return
     }
 
@@ -149,11 +149,22 @@ export function ProfessionalPlanEditor({
   const handleApplySuggestion = (suggestion: any) => {
     if (suggestion.suggestion && editorRef.current) {
       const editor = editorRef.current
-      // Quill API: insert at end of document
-      const length = editor.getLength()
-      editor.insertText(length - 1, '\n\n' + suggestion.suggestion)
-      // Focus and scroll to end
-      editor.setSelection(length + suggestion.suggestion.length + 1)
+      // Get current content and append suggestion
+      const currentHTML = planContent
+      const suggestionHTML = `<p><br></p><p>${suggestion.suggestion.replace(/\n/g, '</p><p>')}</p>`
+      const newContent = currentHTML + suggestionHTML
+
+      // Update the content
+      setPlanContent(newContent)
+
+      // Focus editor after a short delay
+      setTimeout(() => {
+        if (editor.root) {
+          editor.root.focus()
+          // Scroll to bottom
+          editor.root.scrollTop = editor.root.scrollHeight
+        }
+      }, 100)
     }
   }
 
@@ -184,22 +195,6 @@ export function ProfessionalPlanEditor({
                 )}
               </div>
               <div className="flex items-center gap-3">
-                {mode === 'edit' && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleRequestAIReview}
-                    disabled={isRequestingReview}
-                    className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                  >
-                    {isRequestingReview ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="mr-2 h-4 w-4" />
-                    )}
-                    AI Review
-                  </Button>
-                )}
                 <Button type="button" variant="outline" onClick={() => router.back()}>
                   Cancel
                 </Button>
@@ -209,7 +204,7 @@ export function ProfessionalPlanEditor({
                   ) : (
                     <Save className="mr-2 h-4 w-4" />
                   )}
-                  {mode === 'create' ? 'Create Plan' : 'Save Changes'}
+                  {mode === 'create' ? 'Save Plan' : 'Save Changes'}
                 </Button>
               </div>
             </div>
@@ -372,17 +367,24 @@ export function ProfessionalPlanEditor({
           review={aiReview}
           onClose={() => setShowAISidebar(false)}
           onApplySuggestion={handleApplySuggestion}
+          onRequestReview={handleRequestAIReview}
+          isLoading={isRequestingReview}
         />
       )}
 
-      {/* Show AI Sidebar Toggle */}
-      {aiReview && !showAISidebar && (
+      {/* AI Review Button - Always show, but behavior differs by mode */}
+      {!showAISidebar && (
         <button
-          onClick={() => setShowAISidebar(true)}
-          className="fixed right-4 bottom-4 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors"
-          title="Show AI Review"
+          onClick={aiReview ? () => setShowAISidebar(true) : handleRequestAIReview}
+          disabled={isRequestingReview}
+          className="fixed right-4 bottom-4 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={aiReview ? 'Show AI Review' : mode === 'create' ? 'Save plan first to request AI review' : 'Request AI Review'}
         >
-          <Sparkles className="h-6 w-6" />
+          {isRequestingReview ? (
+            <Loader2 className="h-6 w-6 animate-spin" />
+          ) : (
+            <Sparkles className="h-6 w-6" />
+          )}
         </button>
       )}
     </div>
