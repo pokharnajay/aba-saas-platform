@@ -4,33 +4,48 @@ import { Prisma, UserRole } from '@prisma/client'
  * Query Filters for Role-Based Data Access
  *
  * These functions generate Prisma where clauses based on user role
- * to ensure users only see data they're authorized to access
+ * to ensure users only see data they're authorized to access.
+ *
+ * CRITICAL: All queries MUST include organizationId to ensure
+ * complete data isolation between organizations.
+ *
+ * ROLE HIERARCHY:
+ * - ORG_ADMIN: Full access to everything in the organization
+ * - CLINICAL_MANAGER (and legacy CLINICAL_DIRECTOR): Same as ORG_ADMIN for data access
+ * - BCBA: Access to assigned patients and their data
+ * - RBT/BT: Access to assigned patients and their data
  */
+
+// Helper to check if role is admin-level
+function isAdminRole(role: UserRole): boolean {
+  return ['ORG_ADMIN', 'CLINICAL_MANAGER', 'CLINICAL_DIRECTOR'].includes(role)
+}
 
 /**
  * Get patient access filter based on user role
  *
  * Logic:
- * - ORG_ADMIN & CLINICAL_DIRECTOR: All patients in organization
- * - BCBA, RBT, BT: Only patients assigned to them
- * - HR_MANAGER: No patient access
+ * - ORG_ADMIN, CLINICAL_MANAGER, CLINICAL_DIRECTOR: All patients in organization
+ * - BCBA: Only patients assigned to them as BCBA
+ * - RBT, BT: Only patients assigned to them as RBT
  */
 export function getPatientAccessFilter(
   userId: number,
   userRole: UserRole,
   organizationId: number
 ): Prisma.PatientWhereInput {
+  // CRITICAL: Always include organizationId for data isolation
   const baseFilter: Prisma.PatientWhereInput = {
     organizationId,
     deletedAt: null,
   }
 
-  switch (userRole) {
-    case 'ORG_ADMIN':
-    case 'CLINICAL_DIRECTOR':
-      // Supervisors see all patients in org
-      return baseFilter
+  // Admin-level roles see all patients in organization
+  if (isAdminRole(userRole)) {
+    return baseFilter
+  }
 
+  switch (userRole) {
     case 'BCBA':
       // BCBAs see patients where they're assigned as BCBA
       return {
@@ -66,7 +81,7 @@ export function getPatientAccessFilter(
  * Get treatment plan access filter based on user role
  *
  * Logic:
- * - ORG_ADMIN & CLINICAL_DIRECTOR: All plans in organization
+ * - ORG_ADMIN, CLINICAL_MANAGER, CLINICAL_DIRECTOR: All plans in organization
  * - BCBA, RBT, BT: Plans they created OR plans for their assigned patients
  */
 export function getTreatmentPlanAccessFilter(
@@ -74,17 +89,18 @@ export function getTreatmentPlanAccessFilter(
   userRole: UserRole,
   organizationId: number
 ): Prisma.TreatmentPlanWhereInput {
+  // CRITICAL: Always include organizationId for data isolation
   const baseFilter: Prisma.TreatmentPlanWhereInput = {
     organizationId,
     deletedAt: null,
   }
 
-  switch (userRole) {
-    case 'ORG_ADMIN':
-    case 'CLINICAL_DIRECTOR':
-      // Supervisors see all plans
-      return baseFilter
+  // Admin-level roles see all plans
+  if (isAdminRole(userRole)) {
+    return baseFilter
+  }
 
+  switch (userRole) {
     case 'BCBA':
       // BCBAs see plans they created OR plans for patients where they're assigned as BCBA
       return {
@@ -130,6 +146,67 @@ export function getTreatmentPlanAccessFilter(
 }
 
 /**
+ * Get session notes access filter based on user role
+ *
+ * Logic:
+ * - ORG_ADMIN, CLINICAL_MANAGER, CLINICAL_DIRECTOR: All session notes in organization
+ * - BCBA, RBT, BT: Session notes for their assigned patients or notes they created
+ */
+export function getSessionNoteAccessFilter(
+  userId: number,
+  userRole: UserRole,
+  organizationId: number
+): Prisma.SessionNoteWhereInput {
+  // CRITICAL: Always include organizationId for data isolation
+  const baseFilter: Prisma.SessionNoteWhereInput = {
+    organizationId,
+    deletedAt: null,
+  }
+
+  // Admin-level roles see all session notes
+  if (isAdminRole(userRole)) {
+    return baseFilter
+  }
+
+  switch (userRole) {
+    case 'BCBA':
+      // BCBAs see notes they created OR notes for patients where they're assigned
+      return {
+        ...baseFilter,
+        OR: [
+          { createdById: userId },
+          {
+            patient: {
+              assignedBCBAId: userId,
+            },
+          },
+        ],
+      }
+
+    case 'RBT':
+    case 'BT':
+      // RBTs/BTs see notes they created OR notes for patients where they're assigned
+      return {
+        ...baseFilter,
+        OR: [
+          { createdById: userId },
+          {
+            patient: {
+              assignedRBTId: userId,
+            },
+          },
+        ],
+      }
+
+    default:
+      return {
+        ...baseFilter,
+        id: -1,
+      }
+  }
+}
+
+/**
  * Get comment access filter
  * Users can see comments on treatment plans they have access to
  */
@@ -148,10 +225,10 @@ export function getCommentAccessFilter(
 
 /**
  * Get template access filter
- * Users can see:
- * - Public templates
- * - Templates from their organization
- * - Templates they created
+ *
+ * Logic:
+ * - ORG_ADMIN, CLINICAL_MANAGER can see and manage all templates
+ * - Others can see public templates and org templates
  */
 export function getTemplateAccessFilter(
   userId: number,
@@ -188,36 +265,33 @@ export function getNotificationAccessFilter(
 
 /**
  * Get audit log access filter
- * Only ORG_ADMIN and CLINICAL_DIRECTOR can view audit logs
- * They see all logs for their organization
+ * Only ORG_ADMIN and CLINICAL_MANAGER can view audit logs
  */
 export function getAuditLogAccessFilter(
   userRole: UserRole,
   organizationId: number
 ): Prisma.AuditLogWhereInput {
-  // Only supervisors can access audit logs
-  if (userRole !== 'ORG_ADMIN' && userRole !== 'CLINICAL_DIRECTOR') {
+  // Only admin-level roles can access audit logs
+  if (!isAdminRole(userRole)) {
     return { id: -1 } // No access
   }
 
   return {
-    OR: [
-      { organizationId }, // Organization logs
-      { organizationId: null }, // System logs
-    ],
+    // CRITICAL: Always filter by organizationId
+    organizationId,
   }
 }
 
 /**
  * Get user access filter for team management
- * HR_MANAGER and ORG_ADMIN can see all users in the organization
+ * ORG_ADMIN and CLINICAL_MANAGER can see all users in the organization
  */
 export function getUserAccessFilter(
   userRole: UserRole,
   organizationId: number
 ): Prisma.UserWhereInput {
-  // Only these roles can view user list
-  if (userRole !== 'ORG_ADMIN' && userRole !== 'HR_MANAGER') {
+  // Only admin-level roles can view user list
+  if (!isAdminRole(userRole)) {
     return { id: -1 } // No access
   }
 
@@ -243,6 +317,7 @@ export function getAIReviewAccessFilter(
   const treatmentPlanFilter = getTreatmentPlanAccessFilter(userId, userRole, organizationId)
 
   return {
+    // CRITICAL: Always filter by organizationId
     organizationId,
     treatmentPlan: treatmentPlanFilter,
   }
@@ -264,5 +339,17 @@ export function getTrainingModuleAccessFilter(
     ],
     // Optionally filter by required roles
     // requiredForRoles: { has: userRole }
+  }
+}
+
+/**
+ * Utility: Ensure organizationId is present in any query
+ * Use this as a safety check in actions
+ */
+export function ensureOrgIsolation(
+  organizationId: number | null | undefined
+): asserts organizationId is number {
+  if (!organizationId) {
+    throw new Error('Organization context required for data access')
   }
 }

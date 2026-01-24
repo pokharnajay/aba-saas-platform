@@ -38,6 +38,12 @@ export async function getOrganizationSettings() {
         maxUsers: true,
         maxPatients: true,
         features: true,
+        logoPath: true,
+        primaryColor: true,
+        secondaryColor: true,
+        companyWebsite: true,
+        companyPhone: true,
+        companyAddress: true,
         createdAt: true,
       },
     })
@@ -50,6 +56,35 @@ export async function getOrganizationSettings() {
   } catch (error: any) {
     console.error('Get organization settings error:', error)
     throw new Error(error.message || 'Failed to fetch organization settings')
+  }
+}
+
+// Get organization branding for sidebar/header (minimal data, cached)
+export async function getOrganizationBranding() {
+  const session = await auth()
+  if (!hasValidSession(session)) {
+    return null
+  }
+
+  const currentOrgId = session.user.currentOrgId
+  if (!currentOrgId) {
+    return null
+  }
+
+  try {
+    const organization = await prisma.organization.findUnique({
+      where: { id: currentOrgId },
+      select: {
+        name: true,
+        logoPath: true,
+        primaryColor: true,
+      },
+    })
+
+    return organization
+  } catch (error: any) {
+    console.error('Get organization branding error:', error)
+    return null
   }
 }
 

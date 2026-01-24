@@ -3,16 +3,54 @@
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/db/prisma'
 import { auth } from '@/lib/auth/auth-config'
-import { hasValidSession, canInviteUsers, canManageUsers } from '@/lib/auth/permissions'
+import {
+  hasValidSession,
+  canInviteUsers,
+  canManageUsers,
+  canCreateClinicalManager,
+  canCreateStaff,
+  canChangeUserPassword,
+  canUpdateUserRole,
+  getAllowedRolesToCreate,
+  hasRole,
+} from '@/lib/auth/permissions'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
+import crypto from 'crypto'
 
-const inviteUserSchema = z.object({
-  email: z.string().email(),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
-  role: z.enum(['ORG_ADMIN', 'CLINICAL_DIRECTOR', 'BCBA', 'RBT', 'BT', 'HR_MANAGER']),
-  password: z.string().min(8),
+// Generate a secure random password
+function generateSecurePassword(length: number = 12): string {
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz'
+  const numbers = '0123456789'
+  const special = '!@#$%^&*'
+
+  // Ensure at least one of each required type
+  let password = ''
+  password += uppercase[crypto.randomInt(uppercase.length)]
+  password += lowercase[crypto.randomInt(lowercase.length)]
+  password += numbers[crypto.randomInt(numbers.length)]
+  password += special[crypto.randomInt(special.length)]
+
+  // Fill the rest with random characters from all sets
+  const allChars = uppercase + lowercase + numbers + special
+  for (let i = password.length; i < length; i++) {
+    password += allChars[crypto.randomInt(allChars.length)]
+  }
+
+  // Shuffle the password
+  return password
+    .split('')
+    .sort(() => crypto.randomInt(3) - 1)
+    .join('')
+}
+
+const createStaffSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
+  phone: z.string().optional(),
+  role: z.enum(['CLINICAL_MANAGER', 'BCBA', 'RBT', 'BT']),
 })
 
 const updateProfileSchema = z.object({
@@ -21,7 +59,16 @@ const updateProfileSchema = z.object({
   phone: z.string().optional(),
 })
 
-export async function inviteUser(data: z.infer<typeof inviteUserSchema>) {
+const resetPasswordSchema = z.object({
+  userId: z.number(),
+})
+
+/**
+ * Create a new staff member with auto-generated password
+ * - Only ORG_ADMIN can create CLINICAL_MANAGER
+ * - ORG_ADMIN and CLINICAL_MANAGER can create BCBA, RBT, BT
+ */
+export async function createStaffMember(data: z.infer<typeof createStaffSchema>) {
   const session = await auth()
   if (!hasValidSession(session)) {
     throw new Error('Unauthorized')
@@ -32,12 +79,25 @@ export async function inviteUser(data: z.infer<typeof inviteUserSchema>) {
     throw new Error('No organization selected')
   }
 
-  if (!canInviteUsers(session)) {
-    throw new Error('Insufficient permissions to invite users')
-  }
-
   try {
-    const validatedData = inviteUserSchema.parse(data)
+    const validatedData = createStaffSchema.parse(data)
+
+    // Check role-based permissions
+    if (validatedData.role === 'CLINICAL_MANAGER') {
+      if (!canCreateClinicalManager(session)) {
+        return { error: 'Only Organization Admins can create Clinical Manager accounts' }
+      }
+    } else {
+      if (!canCreateStaff(session)) {
+        return { error: 'You do not have permission to create staff accounts' }
+      }
+    }
+
+    // Check if role is in allowed list for this user
+    const allowedRoles = getAllowedRolesToCreate(session)
+    if (!allowedRoles.includes(validatedData.role)) {
+      return { error: `You cannot create accounts with the ${validatedData.role} role` }
+    }
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -56,29 +116,17 @@ export async function inviteUser(data: z.infer<typeof inviteUserSchema>) {
       })
 
       if (existingOrgUser) {
-        return { error: 'User already exists in this organization' }
+        return { error: 'This email is already registered in your organization' }
       }
 
-      // Add existing user to organization
-      await prisma.organizationUser.create({
-        data: {
-          organizationId: currentOrgId,
-          userId: existingUser.id,
-          role: validatedData.role,
-          status: 'ACTIVE',
-          invitedById: parseInt(session.user.id),
-          invitedAt: new Date(),
-          joinedAt: new Date(),
-        },
-      })
-
-      revalidatePath('/team')
-      return { success: true, userId: existingUser.id }
+      return { error: 'This email is already registered. Contact support if you need to add this user.' }
     }
 
-    // Create new user
-    const passwordHash = await bcrypt.hash(validatedData.password, 10)
+    // Generate secure auto-generated password
+    const generatedPassword = generateSecurePassword(14)
+    const passwordHash = await bcrypt.hash(generatedPassword, 10)
 
+    // Create new user in transaction
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -86,7 +134,9 @@ export async function inviteUser(data: z.infer<typeof inviteUserSchema>) {
           passwordHash,
           firstName: validatedData.firstName,
           lastName: validatedData.lastName,
+          phone: validatedData.phone || null,
           status: 'ACTIVE',
+          emailVerified: false, // Will need to verify on first login
         },
       })
 
@@ -106,13 +156,105 @@ export async function inviteUser(data: z.infer<typeof inviteUserSchema>) {
     })
 
     revalidatePath('/team')
-    return { success: true, userId: result.user.id }
+
+    // Return success with generated password (to be shown ONCE to admin)
+    return {
+      success: true,
+      userId: result.user.id,
+      generatedPassword,
+      message: `Account created for ${validatedData.firstName} ${validatedData.lastName}. Share the temporary password with them securely.`,
+    }
   } catch (error: any) {
-    console.error('Invite user error:', error)
-    return { error: error.message || 'Failed to invite user' }
+    console.error('Create staff member error:', error)
+    return { error: error.message || 'Failed to create staff member' }
   }
 }
 
+/**
+ * Reset a user's password (generates new auto-generated password)
+ * - Only ORG_ADMIN can reset any password
+ * - CLINICAL_MANAGER can reset BCBA, RBT, BT passwords
+ */
+export async function resetUserPassword(userId: number) {
+  const session = await auth()
+  if (!hasValidSession(session)) {
+    throw new Error('Unauthorized')
+  }
+
+  const currentOrgId = session.user.currentOrgId
+  if (!currentOrgId) {
+    throw new Error('No organization selected')
+  }
+
+  // Check permission
+  if (!canChangeUserPassword(session, userId)) {
+    return { error: 'You do not have permission to reset this user\'s password' }
+  }
+
+  try {
+    // Verify user is in this organization
+    const orgUser = await prisma.organizationUser.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: currentOrgId,
+          userId,
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    })
+
+    if (!orgUser) {
+      return { error: 'User not found in your organization' }
+    }
+
+    // CLINICAL_MANAGER cannot reset ORG_ADMIN or other CLINICAL_MANAGER passwords
+    const currentRole = session.user.currentOrg?.role
+    if (currentRole === 'CLINICAL_MANAGER' || currentRole === 'CLINICAL_DIRECTOR') {
+      if (orgUser.role === 'ORG_ADMIN' || orgUser.role === 'CLINICAL_MANAGER' || orgUser.role === 'CLINICAL_DIRECTOR') {
+        return { error: 'You cannot reset the password of an admin or clinical manager' }
+      }
+    }
+
+    // Generate new secure password
+    const generatedPassword = generateSecurePassword(14)
+    const passwordHash = await bcrypt.hash(generatedPassword, 10)
+
+    // Update password
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    })
+
+    revalidatePath('/team')
+
+    return {
+      success: true,
+      generatedPassword,
+      userName: `${orgUser.user.firstName} ${orgUser.user.lastName}`,
+      message: `Password reset for ${orgUser.user.firstName} ${orgUser.user.lastName}. Share the new temporary password securely.`,
+    }
+  } catch (error: any) {
+    console.error('Reset password error:', error)
+    return { error: error.message || 'Failed to reset password' }
+  }
+}
+
+/**
+ * Get all users in the organization
+ */
 export async function getOrganizationUsers() {
   const session = await auth()
   if (!hasValidSession(session)) {
@@ -135,14 +277,23 @@ export async function getOrganizationUsers() {
           email: true,
           firstName: true,
           lastName: true,
+          phone: true,
           status: true,
           lastLogin: true,
+          createdAt: true,
+        },
+      },
+      invitedBy: {
+        select: {
+          firstName: true,
+          lastName: true,
         },
       },
     },
-    orderBy: {
-      createdAt: 'desc',
-    },
+    orderBy: [
+      { role: 'asc' },
+      { createdAt: 'desc' },
+    ],
   })
 
   return orgUsers.map((ou) => ({
@@ -150,14 +301,24 @@ export async function getOrganizationUsers() {
     email: ou.user.email,
     firstName: ou.user.firstName,
     lastName: ou.user.lastName,
+    phone: ou.user.phone,
     role: ou.role,
     status: ou.user.status,
     orgStatus: ou.status,
     lastLogin: ou.user.lastLogin,
     joinedAt: ou.joinedAt,
+    createdAt: ou.user.createdAt,
+    invitedBy: ou.invitedBy
+      ? `${ou.invitedBy.firstName} ${ou.invitedBy.lastName}`
+      : null,
   }))
 }
 
+/**
+ * Update a user's role
+ * - Only ORG_ADMIN can change to CLINICAL_MANAGER
+ * - ORG_ADMIN and CLINICAL_MANAGER can change to BCBA, RBT, BT
+ */
 export async function updateUserRole(userId: number, newRole: string) {
   const session = await auth()
   if (!hasValidSession(session)) {
@@ -170,10 +331,42 @@ export async function updateUserRole(userId: number, newRole: string) {
   }
 
   if (!canManageUsers(session)) {
-    throw new Error('Insufficient permissions to manage users')
+    return { error: 'Insufficient permissions to manage users' }
+  }
+
+  // Check if user can assign this specific role
+  if (!canUpdateUserRole(session, newRole as any)) {
+    return { error: `You cannot assign the ${newRole} role` }
   }
 
   try {
+    // Cannot change your own role
+    if (userId === parseInt(session.user.id)) {
+      return { error: 'You cannot change your own role' }
+    }
+
+    // Get current user's role to check if demotion is valid
+    const currentOrgUser = await prisma.organizationUser.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: currentOrgId,
+          userId,
+        },
+      },
+    })
+
+    if (!currentOrgUser) {
+      return { error: 'User not found in your organization' }
+    }
+
+    // CLINICAL_MANAGER cannot change ORG_ADMIN or other CLINICAL_MANAGER roles
+    const currentRole = session.user.currentOrg?.role
+    if (currentRole === 'CLINICAL_MANAGER' || currentRole === 'CLINICAL_DIRECTOR') {
+      if (currentOrgUser.role === 'ORG_ADMIN' || currentOrgUser.role === 'CLINICAL_MANAGER' || currentOrgUser.role === 'CLINICAL_DIRECTOR') {
+        return { error: 'You cannot modify the role of an admin or clinical manager' }
+      }
+    }
+
     await prisma.organizationUser.update({
       where: {
         organizationId_userId: {
@@ -194,6 +387,9 @@ export async function updateUserRole(userId: number, newRole: string) {
   }
 }
 
+/**
+ * Deactivate a user in the organization
+ */
 export async function deactivateUser(userId: number) {
   const session = await auth()
   if (!hasValidSession(session)) {
@@ -206,10 +402,50 @@ export async function deactivateUser(userId: number) {
   }
 
   if (!canManageUsers(session)) {
-    throw new Error('Insufficient permissions to manage users')
+    return { error: 'Insufficient permissions to manage users' }
   }
 
   try {
+    // Cannot deactivate yourself
+    if (userId === parseInt(session.user.id)) {
+      return { error: 'You cannot deactivate your own account' }
+    }
+
+    // Get current user's role
+    const currentOrgUser = await prisma.organizationUser.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: currentOrgId,
+          userId,
+        },
+      },
+    })
+
+    if (!currentOrgUser) {
+      return { error: 'User not found in your organization' }
+    }
+
+    // CLINICAL_MANAGER cannot deactivate ORG_ADMIN or other CLINICAL_MANAGERs
+    const currentRole = session.user.currentOrg?.role
+    if (currentRole === 'CLINICAL_MANAGER' || currentRole === 'CLINICAL_DIRECTOR') {
+      if (currentOrgUser.role === 'ORG_ADMIN' || currentOrgUser.role === 'CLINICAL_MANAGER' || currentOrgUser.role === 'CLINICAL_DIRECTOR') {
+        return { error: 'You cannot deactivate an admin or clinical manager' }
+      }
+    }
+
+    await prisma.organizationUser.update({
+      where: {
+        organizationId_userId: {
+          organizationId: currentOrgId,
+          userId,
+        },
+      },
+      data: {
+        status: 'INACTIVE',
+      },
+    })
+
+    // Also mark user as inactive
     await prisma.user.update({
       where: { id: userId },
       data: { status: 'INACTIVE' },
@@ -223,6 +459,53 @@ export async function deactivateUser(userId: number) {
   }
 }
 
+/**
+ * Reactivate a user in the organization
+ */
+export async function reactivateUser(userId: number) {
+  const session = await auth()
+  if (!hasValidSession(session)) {
+    throw new Error('Unauthorized')
+  }
+
+  const currentOrgId = session.user.currentOrgId
+  if (!currentOrgId) {
+    throw new Error('No organization selected')
+  }
+
+  if (!canManageUsers(session)) {
+    return { error: 'Insufficient permissions to manage users' }
+  }
+
+  try {
+    await prisma.organizationUser.update({
+      where: {
+        organizationId_userId: {
+          organizationId: currentOrgId,
+          userId,
+        },
+      },
+      data: {
+        status: 'ACTIVE',
+      },
+    })
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { status: 'ACTIVE' },
+    })
+
+    revalidatePath('/team')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Reactivate user error:', error)
+    return { error: error.message || 'Failed to reactivate user' }
+  }
+}
+
+/**
+ * Update own profile (name, phone only - not password)
+ */
 export async function updateProfile(data: z.infer<typeof updateProfileSchema>) {
   const session = await auth()
   if (!hasValidSession(session)) {
@@ -247,4 +530,9 @@ export async function updateProfile(data: z.infer<typeof updateProfileSchema>) {
     console.error('Update profile error:', error)
     return { error: error.message || 'Failed to update profile' }
   }
+}
+
+// Legacy function for backward compatibility - redirects to createStaffMember
+export async function inviteUser(data: any) {
+  return createStaffMember(data)
 }

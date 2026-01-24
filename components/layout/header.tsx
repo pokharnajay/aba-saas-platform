@@ -6,6 +6,12 @@ import { NotificationDropdown } from '@/components/layout/notification-dropdown'
 import { logoutAction } from '@/actions/auth'
 import { useRouter } from 'next/navigation'
 
+interface OrganizationBranding {
+  name: string
+  logoPath?: string | null
+  primaryColor?: string | null
+}
+
 interface HeaderProps {
   user: {
     firstName: string
@@ -13,11 +19,13 @@ interface HeaderProps {
     email: string
     currentOrg: {
       name: string
+      role: string
     } | null
   }
+  organization?: OrganizationBranding | null
 }
 
-export function Header({ user }: HeaderProps) {
+export function Header({ user, organization }: HeaderProps) {
   const router = useRouter()
 
   const handleLogout = async () => {
@@ -26,11 +34,14 @@ export function Header({ user }: HeaderProps) {
     router.refresh()
   }
 
+  // Use organization branding name, fallback to currentOrg name
+  const displayName = organization?.name || user.currentOrg?.name || 'Dashboard'
+
   return (
     <header className="flex items-center justify-between h-16 px-6 bg-white border-b">
       <div>
         <h2 className="text-lg font-semibold text-gray-900">
-          {user.currentOrg?.name || 'ABA Platform'}
+          {displayName}
         </h2>
       </div>
 
@@ -45,7 +56,7 @@ export function Header({ user }: HeaderProps) {
             <p className="text-xs text-gray-500">{user.email}</p>
           </div>
 
-          <Button variant="ghost" size="icon" onClick={handleLogout}>
+          <Button variant="ghost" size="icon" onClick={handleLogout} title="Sign out">
             <LogOut className="w-5 h-5" />
           </Button>
         </div>

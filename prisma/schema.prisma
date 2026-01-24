@@ -23,6 +23,15 @@ model Organization {
   features         Json     @default("{\"aiReviewer\": false, \"trainingModule\": false}")
   settings         Json     @default("{}")
   billingEmail     String?  @db.VarChar(255)
+
+  // Branding - White Label Support
+  logoPath         String?  @db.VarChar(500)
+  primaryColor     String?  @db.VarChar(7)  // Hex color e.g., #3B82F6
+  secondaryColor   String?  @db.VarChar(7)
+  companyWebsite   String?  @db.VarChar(255)
+  companyPhone     String?  @db.VarChar(20)
+  companyAddress   String?  @db.Text
+
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   deletedAt        DateTime?
@@ -136,12 +145,14 @@ model OrganizationUser {
 }
 
 enum UserRole {
-  ORG_ADMIN
-  CLINICAL_DIRECTOR
-  BCBA
-  RBT
-  BT
-  HR_MANAGER
+  ORG_ADMIN          // Organization owner - full control
+  CLINICAL_MANAGER   // Clinical Manager - same as ORG_ADMIN except can't create other Clinical Managers
+  BCBA               // Board Certified Behavior Analyst - creates treatment plans
+  RBT                // Registered Behavior Technician - session notes, view plans
+  BT                 // Behavior Technician - same as RBT
+  // Legacy roles (kept for migration compatibility)
+  CLINICAL_DIRECTOR  // Mapped to CLINICAL_MANAGER
+  HR_MANAGER         // Deprecated
 }
 
 enum OrgUserStatus {
