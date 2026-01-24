@@ -17,6 +17,8 @@ import {
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import crypto from 'crypto'
+import { sendStaffWelcomeEmail, sendPasswordRegeneratedEmail } from '@/lib/services/email'
+import { createAuditLog } from '@/lib/services/audit-logger'
 
 // Generate a secure random password
 function generateSecurePassword(length: number = 12): string {
@@ -157,12 +159,74 @@ export async function createStaffMember(data: z.infer<typeof createStaffSchema>)
 
     revalidatePath('/team')
 
+    // Get organization details for welcome email
+    const organization = await prisma.organization.findUnique({
+      where: { id: currentOrgId },
+      select: { name: true, subdomain: true }
+    })
+
+    // Format role name for display
+    const roleDisplayNames: Record<string, string> = {
+      'CLINICAL_MANAGER': 'Clinical Manager',
+      'BCBA': 'BCBA (Board Certified Behavior Analyst)',
+      'RBT': 'RBT (Registered Behavior Technician)',
+      'BT': 'Behavior Technician',
+    }
+    const roleName = roleDisplayNames[validatedData.role] || validatedData.role
+
+    // Build login URL
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    const loginUrl = organization?.subdomain
+      ? `${baseUrl.replace('://', `://${organization.subdomain}.`).replace('localhost', 'localhost')}`
+      : baseUrl
+
+    // Send welcome email with login credentials
+    const emailResult = await sendStaffWelcomeEmail(
+      validatedData.email.toLowerCase(),
+      validatedData.firstName,
+      validatedData.lastName,
+      generatedPassword,
+      organization?.name || 'ABA Practice Manager',
+      loginUrl,
+      roleName
+    )
+
+    if (!emailResult.success) {
+      console.error('Failed to send welcome email:', emailResult.error)
+      // Log the failure but don't fail the operation
+      await createAuditLog({
+        organizationId: currentOrgId,
+        userId: parseInt(session.user.id),
+        action: 'staff_welcome_email_failed',
+        resourceType: 'user',
+        resourceId: result.user.id,
+        changes: { error: emailResult.error, targetEmail: validatedData.email }
+      })
+    } else {
+      // Log successful creation and email
+      await createAuditLog({
+        organizationId: currentOrgId,
+        userId: parseInt(session.user.id),
+        action: 'staff_member_created',
+        resourceType: 'user',
+        resourceId: result.user.id,
+        changes: {
+          email: validatedData.email,
+          role: validatedData.role,
+          welcomeEmailSent: true
+        }
+      })
+    }
+
     // Return success with generated password (to be shown ONCE to admin)
     return {
       success: true,
       userId: result.user.id,
       generatedPassword,
-      message: `Account created for ${validatedData.firstName} ${validatedData.lastName}. Share the temporary password with them securely.`,
+      emailSent: emailResult.success,
+      message: emailResult.success
+        ? `Account created for ${validatedData.firstName} ${validatedData.lastName}. A welcome email with login credentials has been sent to ${validatedData.email}.`
+        : `Account created for ${validatedData.firstName} ${validatedData.lastName}. Note: Welcome email could not be sent. Please share the temporary password securely.`,
     }
   } catch (error: any) {
     console.error('Create staff member error:', error)
@@ -238,13 +302,55 @@ export async function resetUserPassword(userId: number) {
       },
     })
 
+    // Get organization and current user details for email
+    const organization = await prisma.organization.findUnique({
+      where: { id: currentOrgId },
+      select: { name: true }
+    })
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: parseInt(session.user.id) },
+      select: { firstName: true, lastName: true }
+    })
+
+    const regeneratedByName = currentUser
+      ? `${currentUser.firstName} ${currentUser.lastName}`
+      : 'An administrator'
+
+    // Send email notification with new password
+    const loginUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    const emailResult = await sendPasswordRegeneratedEmail(
+      orgUser.user.email,
+      orgUser.user.firstName || 'Team Member',
+      generatedPassword,
+      organization?.name || 'ABA Practice Manager',
+      loginUrl,
+      regeneratedByName
+    )
+
+    // Log the action
+    await createAuditLog({
+      organizationId: currentOrgId,
+      userId: parseInt(session.user.id),
+      action: 'password_reset_by_admin',
+      resourceType: 'user',
+      resourceId: userId,
+      changes: {
+        targetEmail: orgUser.user.email,
+        emailNotificationSent: emailResult.success
+      }
+    })
+
     revalidatePath('/team')
 
     return {
       success: true,
       generatedPassword,
       userName: `${orgUser.user.firstName} ${orgUser.user.lastName}`,
-      message: `Password reset for ${orgUser.user.firstName} ${orgUser.user.lastName}. Share the new temporary password securely.`,
+      emailSent: emailResult.success,
+      message: emailResult.success
+        ? `Password reset for ${orgUser.user.firstName} ${orgUser.user.lastName}. An email with the new password has been sent to ${orgUser.user.email}.`
+        : `Password reset for ${orgUser.user.firstName} ${orgUser.user.lastName}. Note: Email notification could not be sent. Please share the new temporary password securely.`,
     }
   } catch (error: any) {
     console.error('Reset password error:', error)

@@ -68,7 +68,7 @@ export async function registerAction(data: RegisterInput) {
           status: 'TRIAL',
           subscriptionPlan: 'STARTER',
           features: {
-            aiReviewer: false,
+            aiReviewer: true,
             trainingModule: false,
           },
         },

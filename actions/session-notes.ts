@@ -38,8 +38,8 @@ export async function createSessionNote(data: z.infer<typeof sessionNoteSchema>)
   const userId = parseInt(session.user.id)
   const userRole = getCurrentRole(session)
 
-  // Only RBT, BT, BCBA, and Clinical Director can create session notes
-  if (!['RBT', 'BT', 'BCBA', 'CLINICAL_DIRECTOR'].includes(userRole || '')) {
+  // Only RBT, BT, BCBA, Clinical Manager, and ORG_ADMIN can create session notes
+  if (!['RBT', 'BT', 'BCBA', 'CLINICAL_MANAGER', 'CLINICAL_DIRECTOR', 'ORG_ADMIN'].includes(userRole || '')) {
     return { error: 'Only therapists and clinical staff can create session notes' }
   }
 
@@ -61,6 +61,7 @@ export async function createSessionNote(data: z.infer<typeof sessionNoteSchema>)
 
     // Check if user has access to this patient
     const hasAccess =
+      userRole === 'CLINICAL_MANAGER' ||
       userRole === 'CLINICAL_DIRECTOR' ||
       userRole === 'ORG_ADMIN' ||
       patient.assignedBCBAId === userId ||
@@ -153,6 +154,7 @@ export async function getSessionNotes(patientId?: number) {
 
       // Check access
       const hasAccess =
+        userRole === 'CLINICAL_MANAGER' ||
         userRole === 'CLINICAL_DIRECTOR' ||
         userRole === 'ORG_ADMIN' ||
         patient.assignedBCBAId === userId ||
@@ -172,7 +174,7 @@ export async function getSessionNotes(patientId?: number) {
           assignedRBTId: userId,
         }
       }
-      // CLINICAL_DIRECTOR and ORG_ADMIN see all session notes
+      // CLINICAL_MANAGER, CLINICAL_DIRECTOR, and ORG_ADMIN see all session notes
     }
 
     const sessionNotes = await prisma.sessionNote.findMany({
@@ -280,6 +282,7 @@ export async function getSessionNote(id: number) {
 
     // Check access
     const hasAccess =
+      userRole === 'CLINICAL_MANAGER' ||
       userRole === 'CLINICAL_DIRECTOR' ||
       userRole === 'ORG_ADMIN' ||
       sessionNote.patient.assignedBCBAId === userId ||
@@ -349,8 +352,8 @@ export async function updateSessionNote(id: number, data: z.infer<typeof session
       return { error: 'Session note not found' }
     }
 
-    // Only the creator can edit (for now)
-    if (existingNote.createdById !== userId && userRole !== 'CLINICAL_DIRECTOR' && userRole !== 'ORG_ADMIN') {
+    // Only the creator can edit (or admins)
+    if (existingNote.createdById !== userId && userRole !== 'CLINICAL_MANAGER' && userRole !== 'CLINICAL_DIRECTOR' && userRole !== 'ORG_ADMIN') {
       return { error: 'You can only edit your own session notes' }
     }
 
@@ -424,7 +427,7 @@ export async function deleteSessionNote(id: number) {
     }
 
     // Only creator or admins can delete
-    if (existingNote.createdById !== userId && userRole !== 'CLINICAL_DIRECTOR' && userRole !== 'ORG_ADMIN') {
+    if (existingNote.createdById !== userId && userRole !== 'CLINICAL_MANAGER' && userRole !== 'CLINICAL_DIRECTOR' && userRole !== 'ORG_ADMIN') {
       return { error: 'You can only delete your own session notes' }
     }
 

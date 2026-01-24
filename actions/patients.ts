@@ -68,7 +68,7 @@ export async function createPatient(data: z.infer<typeof patientSchema>) {
         medications: validatedData.medications as any,
         assignedBCBAId: validatedData.assignedBCBAId || null,
         assignedRBTId: validatedData.assignedRBTId || null,
-        enrollmentDate: validatedData.enrollmentDate || null,
+        enrollmentDate: validatedData.enrollmentDate ? new Date(validatedData.enrollmentDate) : null,
         createdById: parseInt(session.user.id)
       }
     })
@@ -273,7 +273,7 @@ export async function updatePatient(id: number, data: z.infer<typeof patientSche
         medications: validatedData.medications as any,
         assignedBCBAId: validatedData.assignedBCBAId || null,
         assignedRBTId: validatedData.assignedRBTId || null,
-        enrollmentDate: validatedData.enrollmentDate || null,
+        enrollmentDate: validatedData.enrollmentDate ? new Date(validatedData.enrollmentDate) : null,
       },
     })
 
