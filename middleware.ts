@@ -78,6 +78,7 @@ export async function middleware(request: NextRequest) {
     '/register',
     '/forgot-password',
     '/reset-password',
+    '/colors',
     '/api/health',
     '/api/auth',
     '/api/validate-subdomain',
