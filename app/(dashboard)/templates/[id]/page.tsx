@@ -28,7 +28,7 @@ export default async function TemplateDetailPage({ params }: { params: Promise<{
 
     const canEdit =
       template.createdById === parseInt(session.user.id) ||
-      hasRole(session, ['ORG_ADMIN', 'CLINICAL_DIRECTOR'])
+      hasRole(session, ['ORG_ADMIN', 'CLINICAL_MANAGER'])
 
     const templateContent = template.templateContent as any
 

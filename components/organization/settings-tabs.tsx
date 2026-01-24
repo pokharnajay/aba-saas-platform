@@ -16,6 +16,8 @@ interface OrganizationSettingsTabsProps {
     maxUsers: number
     maxPatients: number
     features: any
+    logoPath?: string | null
+    primaryColor?: string | null
     createdAt: Date
   }
 }

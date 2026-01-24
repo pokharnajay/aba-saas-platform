@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { Plus, FileText } from 'lucide-react'
 import { decryptPatientPHI } from '@/lib/services/encryption'
 import { canCreateTreatmentPlan } from '@/lib/auth/permissions'
+import { PLAN_STATUS_LABELS } from '@/lib/utils/constants'
 
 export default async function TreatmentPlansPage() {
   const session = await auth()
@@ -90,7 +91,7 @@ export default async function TreatmentPlansPage() {
                               : 'bg-purple-100 text-purple-800'
                           }`}
                         >
-                          {plan.status.replace(/_/g, ' ')}
+                          {PLAN_STATUS_LABELS[plan.status] || plan.status.replace(/_/g, ' ')}
                         </span>
                       </div>
                       <p className="mt-1 text-sm text-gray-600">

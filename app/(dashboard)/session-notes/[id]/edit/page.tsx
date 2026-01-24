@@ -37,7 +37,7 @@ export default async function EditSessionNotePage({
     // Only creator or admins can edit
     if (
       sessionNote.createdById !== userId &&
-      userRole !== 'CLINICAL_DIRECTOR' &&
+      userRole !== 'CLINICAL_MANAGER' &&
       userRole !== 'ORG_ADMIN'
     ) {
       redirect(`/session-notes/${sessionNoteId}`)

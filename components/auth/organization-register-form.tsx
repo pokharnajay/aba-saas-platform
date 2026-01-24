@@ -189,9 +189,7 @@ export function OrganizationRegisterForm() {
     setLoading(true)
 
     try {
-      // TODO: Upload logo file if present
-      // For now, we'll handle this in a follow-up
-
+      // Step 1: Register organization and user
       const result = await registerAction({
         email: formData.email,
         password: formData.password,
@@ -205,10 +203,33 @@ export function OrganizationRegisterForm() {
 
       if (result?.error) {
         setError(result.error)
-      } else {
-        router.push('/dashboard')
-        router.refresh()
+        setLoading(false)
+        return
       }
+
+      // Step 2: Upload logo if present (after successful registration and auto-login)
+      if (logoFile) {
+        try {
+          const logoFormData = new FormData()
+          logoFormData.append('logo', logoFile)
+
+          const uploadResponse = await fetch('/api/upload/logo', {
+            method: 'POST',
+            body: logoFormData,
+          })
+
+          if (!uploadResponse.ok) {
+            // Logo upload failed but registration succeeded - continue anyway
+            console.error('Logo upload failed, but registration succeeded')
+          }
+        } catch (logoError) {
+          // Logo upload failed but registration succeeded - continue anyway
+          console.error('Logo upload error:', logoError)
+        }
+      }
+
+      router.push('/dashboard')
+      router.refresh()
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred')
     } finally {

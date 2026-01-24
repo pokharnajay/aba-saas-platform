@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { Edit, FileText } from 'lucide-react'
 import { canEditPatient, canCreateTreatmentPlan, getCurrentRole } from '@/lib/auth/permissions'
 import { SessionNotesList } from '@/components/session-notes/session-notes-list'
+import { PLAN_STATUS_LABELS } from '@/lib/utils/constants'
 
 export default async function PatientDetailPage({
   params,
@@ -31,7 +32,7 @@ export default async function PatientDetailPage({
     const canEdit = canEditPatient(session, patient)
     const canCreatePlan = canCreateTreatmentPlan(session)
     const userRole = getCurrentRole(session)
-    const canCreateSessionNote = ['RBT', 'BT', 'BCBA', 'CLINICAL_DIRECTOR'].includes(userRole || '')
+    const canCreateSessionNote = ['RBT', 'BT', 'BCBA', 'CLINICAL_MANAGER', 'ORG_ADMIN'].includes(userRole || '')
 
     return (
       <div className="max-w-6xl mx-auto space-y-6">
@@ -350,7 +351,7 @@ export default async function PatientDetailPage({
                             : 'bg-purple-100 text-purple-800'
                         }`}
                       >
-                        {plan.status.replace(/_/g, ' ')}
+                        {PLAN_STATUS_LABELS[plan.status] || plan.status.replace(/_/g, ' ')}
                       </span>
                     </div>
                   </Link>

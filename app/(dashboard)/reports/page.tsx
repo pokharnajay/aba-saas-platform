@@ -25,8 +25,8 @@ export default async function ReportsPage() {
     redirect('/login')
   }
 
-  // Only ORG_ADMIN and CLINICAL_DIRECTOR can view reports
-  if (!hasRole(session, ['ORG_ADMIN', 'CLINICAL_DIRECTOR'])) {
+  // Only ORG_ADMIN and CLINICAL_MANAGER can view reports
+  if (!hasRole(session, ['ORG_ADMIN', 'CLINICAL_MANAGER'])) {
     redirect('/dashboard')
   }
 
@@ -134,7 +134,7 @@ export default async function ReportsPage() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Pending Director Review</span>
+                  <span className="text-sm text-gray-600">Pending Manager Review</span>
                   <span className="font-semibold">
                     {treatmentPlanStats.pendingDirectorReview || 0}
                   </span>

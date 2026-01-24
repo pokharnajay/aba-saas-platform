@@ -17,8 +17,8 @@ export default async function NewSessionNotePage({
 
   const userRole = getCurrentRole(session)
 
-  // Only RBT, BT, BCBA, and Clinical Director can create session notes
-  if (!['RBT', 'BT', 'BCBA', 'CLINICAL_DIRECTOR'].includes(userRole || '')) {
+  // Only clinical staff can create session notes
+  if (!['RBT', 'BT', 'BCBA', 'CLINICAL_MANAGER', 'ORG_ADMIN'].includes(userRole || '')) {
     redirect('/patients')
   }
 

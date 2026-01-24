@@ -10,7 +10,8 @@ export default async function NewTemplatePage() {
     redirect('/login')
   }
 
-  if (!hasRole(session, ['BCBA', 'CLINICAL_DIRECTOR', 'ORG_ADMIN'])) {
+  // Only CLINICAL_MANAGER and ORG_ADMIN can create templates
+  if (!hasRole(session, ['CLINICAL_MANAGER', 'ORG_ADMIN'])) {
     redirect('/templates')
   }
 

@@ -2,11 +2,9 @@ import { auth } from '@/lib/auth/auth-config'
 import { redirect } from 'next/navigation'
 import { getOrganizationUsers } from '@/actions/users'
 import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import Link from 'next/link'
-import { UserPlus } from 'lucide-react'
-import { canInviteUsers } from '@/lib/auth/permissions'
-import { InviteUserDialog } from '@/components/team/invite-user-dialog'
+import { canCreateStaff } from '@/lib/auth/permissions'
+import { CreateStaffDialog } from '@/components/team/create-staff-dialog'
+import { ROLE_LABELS } from '@/lib/utils/constants'
 
 export default async function TeamPage() {
   const session = await auth()
@@ -16,7 +14,13 @@ export default async function TeamPage() {
   }
 
   const users = await getOrganizationUsers()
-  const canInvite = canInviteUsers(session)
+  const canCreate = canCreateStaff(session)
+  const currentUserRole = session.user.currentOrg?.role || 'RBT'
+
+  // Helper to format role for display
+  const formatRole = (role: string): string => {
+    return ROLE_LABELS[role] || role.replace(/_/g, ' ')
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -26,7 +30,7 @@ export default async function TeamPage() {
           <p className="mt-2 text-gray-600">Manage your organization's team</p>
         </div>
 
-        {canInvite && <InviteUserDialog />}
+        {canCreate && <CreateStaffDialog currentUserRole={currentUserRole} />}
       </div>
 
       <Card>
@@ -64,7 +68,7 @@ export default async function TeamPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                      {user.role.replace(/_/g, ' ')}
+                      {formatRole(user.role)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">

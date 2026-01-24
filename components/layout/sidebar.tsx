@@ -30,19 +30,19 @@ const navigation: NavigationItem[] = [
     name: 'Templates',
     href: '/templates',
     icon: BookTemplate,
-    roles: ['ORG_ADMIN', 'CLINICAL_MANAGER', 'CLINICAL_DIRECTOR'],
+    roles: ['ORG_ADMIN', 'CLINICAL_MANAGER', 'BCBA'], // BCBA can view templates
   },
   {
     name: 'Team',
     href: '/team',
     icon: UsersRound,
-    roles: ['ORG_ADMIN', 'CLINICAL_MANAGER', 'CLINICAL_DIRECTOR'],
+    roles: ['ORG_ADMIN', 'CLINICAL_MANAGER'],
   },
   {
     name: 'Reports',
     href: '/reports',
     icon: BarChart3,
-    roles: ['ORG_ADMIN', 'CLINICAL_MANAGER', 'CLINICAL_DIRECTOR'],
+    roles: ['ORG_ADMIN', 'CLINICAL_MANAGER'],
   },
   {
     name: 'Organization',
@@ -150,7 +150,7 @@ export function Sidebar({ userRole, organization }: SidebarProps) {
           <span className="text-xs text-gray-400">Role</span>
           <span className="text-xs font-medium px-2 py-1 rounded bg-gray-700 text-gray-200">
             {userRole === 'ORG_ADMIN' ? 'Admin' :
-             userRole === 'CLINICAL_MANAGER' || userRole === 'CLINICAL_DIRECTOR' ? 'Clinical Manager' :
+             userRole === 'CLINICAL_MANAGER' ? 'Clinical Manager' :
              userRole}
           </span>
         </div>

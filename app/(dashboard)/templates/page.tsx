@@ -14,14 +14,14 @@ export default async function TemplatesPage() {
     redirect('/login')
   }
 
-  // Only BCBA, CLINICAL_DIRECTOR, and ORG_ADMIN can access templates
-  if (!hasRole(session, ['BCBA', 'CLINICAL_DIRECTOR', 'ORG_ADMIN'])) {
+  // Only BCBA, CLINICAL_MANAGER, and ORG_ADMIN can access templates
+  if (!hasRole(session, ['BCBA', 'CLINICAL_MANAGER', 'ORG_ADMIN'])) {
     redirect('/dashboard')
   }
 
   const templates = await getTemplates()
 
-  const canCreate = hasRole(session, ['BCBA', 'CLINICAL_DIRECTOR', 'ORG_ADMIN'])
+  const canCreate = hasRole(session, ['CLINICAL_MANAGER', 'ORG_ADMIN'])
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

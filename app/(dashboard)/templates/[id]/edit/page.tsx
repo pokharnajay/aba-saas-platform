@@ -11,7 +11,8 @@ export default async function EditTemplatePage({ params }: { params: Promise<{ i
     redirect('/login')
   }
 
-  if (!hasRole(session, ['BCBA', 'CLINICAL_DIRECTOR', 'ORG_ADMIN'])) {
+  // Only CLINICAL_MANAGER and ORG_ADMIN can edit templates
+  if (!hasRole(session, ['CLINICAL_MANAGER', 'ORG_ADMIN'])) {
     redirect('/templates')
   }
 
@@ -27,7 +28,7 @@ export default async function EditTemplatePage({ params }: { params: Promise<{ i
     // Check if user can edit
     if (
       template.createdById !== parseInt(session.user.id) &&
-      !hasRole(session, ['ORG_ADMIN', 'CLINICAL_DIRECTOR'])
+      !hasRole(session, ['ORG_ADMIN', 'CLINICAL_MANAGER'])
     ) {
       redirect('/templates')
     }

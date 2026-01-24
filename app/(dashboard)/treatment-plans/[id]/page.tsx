@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Edit, Sparkles } from 'lucide-react'
 import { canEditTreatmentPlan, canApproveTreatmentPlan, canRejectTreatmentPlan, canRequestAIReview } from '@/lib/auth/permissions'
+import { PLAN_STATUS_LABELS } from '@/lib/utils/constants'
 import { decryptPatientPHI } from '@/lib/services/encryption'
 import { WorkflowActions } from '@/components/treatment-plans/workflow-actions'
 
@@ -78,7 +79,7 @@ export default async function TreatmentPlanDetailPage({
                     : 'bg-red-100 text-red-800'
                 }`}
               >
-                {plan.status.replace(/_/g, ' ')}
+                {PLAN_STATUS_LABELS[plan.status] || plan.status.replace(/_/g, ' ')}
               </span>
             </div>
 
