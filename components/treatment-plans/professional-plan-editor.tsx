@@ -9,6 +9,11 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { RichTextEditor } from '@/components/editor/rich-text-editor'
+import { TiptapEditor } from '@/components/editor/tiptap-editor'
+import type { Editor } from '@tiptap/react'
+
+// Feature flag for gradual rollout - set to true to use new Tiptap editor
+const USE_TIPTAP_EDITOR = true
 import { AIReviewSidebar } from '@/components/editor/ai-review-sidebar'
 import {
   Loader2,
@@ -149,22 +154,32 @@ export function ProfessionalPlanEditor({
   const handleApplySuggestion = (suggestion: any) => {
     if (suggestion.suggestion && editorRef.current) {
       const editor = editorRef.current
-      // Get current content and append suggestion
-      const currentHTML = planContent
-      const suggestionHTML = `<p><br></p><p>${suggestion.suggestion.replace(/\n/g, '</p><p>')}</p>`
-      const newContent = currentHTML + suggestionHTML
 
-      // Update the content
-      setPlanContent(newContent)
+      if (USE_TIPTAP_EDITOR) {
+        // Tiptap editor - use chain commands
+        const suggestionHTML = `<p><br></p><p>${suggestion.suggestion.replace(/\n/g, '</p><p>')}</p>`
+        editor.chain()
+          .focus('end')
+          .insertContent(suggestionHTML)
+          .run()
+      } else {
+        // Quill editor - append HTML
+        const currentHTML = planContent
+        const suggestionHTML = `<p><br></p><p>${suggestion.suggestion.replace(/\n/g, '</p><p>')}</p>`
+        const newContent = currentHTML + suggestionHTML
 
-      // Focus editor after a short delay
-      setTimeout(() => {
-        if (editor.root) {
-          editor.root.focus()
-          // Scroll to bottom
-          editor.root.scrollTop = editor.root.scrollHeight
-        }
-      }, 100)
+        // Update the content
+        setPlanContent(newContent)
+
+        // Focus editor after a short delay
+        setTimeout(() => {
+          if (editor.root) {
+            editor.root.focus()
+            // Scroll to bottom
+            editor.root.scrollTop = editor.root.scrollHeight
+          }
+        }, 100)
+      }
     }
   }
 
@@ -349,12 +364,25 @@ export function ProfessionalPlanEditor({
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6">
-                <RichTextEditor
-                  content={planContent}
-                  onChange={setPlanContent}
-                  placeholder="Write your treatment plan here. Include goals, objectives, interventions, data collection methods, and any other relevant clinical information..."
-                  onEditorReady={handleEditorReady}
-                />
+                {USE_TIPTAP_EDITOR ? (
+                  <TiptapEditor
+                    content={planContent}
+                    onChange={setPlanContent}
+                    placeholder="Write your treatment plan here. Include goals, objectives, interventions, data collection methods, and any other relevant clinical information..."
+                    onEditorReady={handleEditorReady}
+                    onAIReview={mode === 'edit' && initialData?.id ? handleRequestAIReview : undefined}
+                    isAIReviewLoading={isRequestingReview}
+                    documentTitle={title || 'Treatment Plan'}
+                    showExportButtons={true}
+                  />
+                ) : (
+                  <RichTextEditor
+                    content={planContent}
+                    onChange={setPlanContent}
+                    placeholder="Write your treatment plan here. Include goals, objectives, interventions, data collection methods, and any other relevant clinical information..."
+                    onEditorReady={handleEditorReady}
+                  />
+                )}
               </CardContent>
             </Card>
           </div>

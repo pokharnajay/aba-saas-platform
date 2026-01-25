@@ -85,35 +85,23 @@ export function Sidebar({ userRole, organization }: SidebarProps) {
       {/* Organization Branding Header */}
       <div className="flex items-center justify-center h-20 bg-gray-800 px-4 border-b border-gray-700">
         {organization?.logoPath ? (
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 relative rounded-lg overflow-hidden bg-white flex items-center justify-center">
-              <Image
-                src={organization.logoPath}
-                alt={organization.name}
-                fill
-                className="object-contain p-1"
-              />
-            </div>
-            <span className="text-lg font-semibold truncate max-w-[140px]">
-              {organization.name}
-            </span>
+          /* Logo exists - show only the logo, no text */
+          <div className="w-12 h-12 relative rounded-lg overflow-hidden bg-white flex items-center justify-center">
+            <Image
+              src={organization.logoPath}
+              alt={organization.name}
+              fill
+              className="object-contain p-1"
+            />
           </div>
         ) : organization?.name ? (
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-              <Building2 className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-lg font-semibold truncate max-w-[140px]">
-              {organization.name}
-            </span>
-          </div>
+          /* No logo but name exists - show only the name */
+          <span className="text-xl font-semibold truncate max-w-[200px]">
+            {organization.name}
+          </span>
         ) : (
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-              <Building2 className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-lg font-semibold">ABA Platform</span>
-          </div>
+          /* No logo and no name - show default */
+          <span className="text-xl font-semibold">ABA Platform</span>
         )}
       </div>
 
