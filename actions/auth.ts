@@ -14,7 +14,26 @@ export async function loginAction(email: string, password: string) {
       redirect: false,
     })
 
-    return { success: true }
+    // Get the user's primary organization subdomain for redirect
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      include: {
+        organizations: {
+          where: { status: 'ACTIVE' },
+          include: {
+            organization: {
+              select: { subdomain: true },
+            },
+          },
+          orderBy: { joinedAt: 'asc' },
+          take: 1,
+        },
+      },
+    })
+
+    const subdomain = user?.organizations[0]?.organization?.subdomain || null
+
+    return { success: true, subdomain }
   } catch (error) {
     if (error instanceof AuthError) {
       switch (error.type) {

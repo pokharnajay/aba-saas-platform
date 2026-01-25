@@ -1,8 +1,27 @@
+import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { auth } from '@/lib/auth/auth-config'
 
-export default function SubdomainNotFoundPage() {
+interface PageProps {
+  searchParams: Promise<{ reason?: string }>
+}
+
+export default async function SubdomainNotFoundPage({ searchParams }: PageProps) {
+  const params = await searchParams
+  const validReasons = ['invalid', 'no_access']
+
+  // If no valid reason parameter, redirect based on auth status
+  if (!params.reason || !validReasons.includes(params.reason)) {
+    const session = await auth()
+    if (session) {
+      redirect('/dashboard')
+    } else {
+      redirect('/login')
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full p-8 text-center">

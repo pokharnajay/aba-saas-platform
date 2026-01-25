@@ -2,19 +2,25 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { auth } from '@/lib/auth/auth-config'
 
-// Cache for subdomain validation (in production, use Redis)
-const subdomainCache = new Map<string, { valid: boolean; orgId: number | null; timestamp: number }>()
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+// Reserved subdomains that should be skipped (no validation needed)
+const RESERVED_SUBDOMAINS = new Set([
+  'www', 'app', 'api', 'admin', 'mail', 'smtp', 'ftp', 'cdn',
+  'static', 'assets', 'images', 'docs', 'help', 'support',
+  'billing', 'status', 'blog', 'dashboard'
+])
 
 export async function middleware(request: NextRequest) {
-  const { pathname, hostname } = request.nextUrl
-  const response = NextResponse.next()
+  const { pathname } = request.nextUrl
+  // Use the host header to get the full hostname including subdomain
+  // request.nextUrl.hostname only returns 'localhost', not 'xyz.localhost'
+  const host = request.headers.get('host') || request.nextUrl.hostname
+  const hostname = host.split(':')[0] // Remove port number
+
 
   // ============================================
-  // HTTPS ENFORCEMENT & SECURITY HEADERS (HIPAA)
+  // HTTPS ENFORCEMENT (HIPAA)
   // ============================================
   if (process.env.NODE_ENV === 'production') {
-    // Enforce HTTPS
     const proto = request.headers.get('x-forwarded-proto')
     if (proto === 'http') {
       const httpsUrl = new URL(request.url)
@@ -23,7 +29,28 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Add security headers (HSTS, CSP, etc.)
+  // ============================================
+  // SUBDOMAIN EXTRACTION (No DB validation here)
+  // ============================================
+  // Database validation happens in layouts (Server Components)
+  // Middleware only extracts and passes the subdomain via request headers
+
+  const subdomain = extractSubdomain(hostname)
+
+  // Clone request headers and add subdomain
+  const requestHeaders = new Headers(request.headers)
+  if (subdomain && !RESERVED_SUBDOMAINS.has(subdomain.toLowerCase())) {
+    requestHeaders.set('x-subdomain', subdomain.toLowerCase())
+  }
+
+  // Create response with modified request headers (for server components)
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  })
+
+  // Add security headers to response
   response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload')
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('X-Frame-Options', 'DENY')
@@ -32,42 +59,10 @@ export async function middleware(request: NextRequest) {
   response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
 
   // ============================================
-  // SUBDOMAIN VALIDATION
+  // STATIC FILES & INTERNALS
   // ============================================
-  // Extract subdomain from hostname
-  // Supports: subdomain.localhost:3000 or subdomain.abaplatform.app
-  let subdomain: string | null = null
-
-  // Handle localhost development
-  if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
-    // Format: subdomain.localhost:3000
-    const parts = hostname.split('.')
-    if (parts.length >= 2 && parts[0] !== 'localhost' && parts[0] !== 'www') {
-      subdomain = parts[0]
-    }
-  } else {
-    // Production: subdomain.abaplatform.app or subdomain.yourdomain.com
-    const parts = hostname.split('.')
-    // Assuming format: subdomain.domain.tld (3 parts) or subdomain.domain.co.uk (4 parts)
-    if (parts.length >= 3 && parts[0] !== 'www' && parts[0] !== 'app') {
-      subdomain = parts[0]
-    }
-  }
-
-  // If we have a subdomain, validate it
-  if (subdomain) {
-    const validationResult = await validateSubdomain(subdomain, request)
-
-    if (!validationResult.valid) {
-      // Invalid subdomain - show 404 page
-      return NextResponse.rewrite(new URL('/subdomain-not-found', request.url))
-    }
-
-    // Set subdomain context in headers for server components
-    response.headers.set('x-subdomain', subdomain)
-    if (validationResult.orgId) {
-      response.headers.set('x-organization-id', validationResult.orgId.toString())
-    }
+  if (pathname.startsWith('/_next') || pathname.startsWith('/favicon') || pathname.includes('.')) {
+    return response
   }
 
   // ============================================
@@ -81,15 +76,9 @@ export async function middleware(request: NextRequest) {
     '/colors',
     '/api/health',
     '/api/auth',
-    '/api/validate-subdomain',
     '/subdomain-not-found'
   ]
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
-
-  // Static files and Next.js internals
-  if (pathname.startsWith('/_next') || pathname.startsWith('/favicon') || pathname.includes('.')) {
-    return response
-  }
 
   // ============================================
   // AUTHENTICATION CHECK
@@ -118,7 +107,6 @@ export async function middleware(request: NextRequest) {
       const maxInactivity = 15 * 60 * 1000 // 15 minutes
 
       if (inactiveTime > maxInactivity) {
-        // Force logout due to inactivity
         return NextResponse.redirect(new URL('/login?timeout=true', request.url))
       }
     }
@@ -135,45 +123,39 @@ export async function middleware(request: NextRequest) {
 }
 
 /**
- * Validate if a subdomain exists and is active
+ * Extract subdomain from hostname
+ * Supports localhost development and production domains
  */
-async function validateSubdomain(
-  subdomain: string,
-  request: NextRequest
-): Promise<{ valid: boolean; orgId: number | null }> {
-  // Check cache first
-  const cached = subdomainCache.get(subdomain)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return { valid: cached.valid, orgId: cached.orgId }
-  }
-
-  try {
-    // Build the validation URL using the current request's origin
-    const url = new URL('/api/validate-subdomain', request.url)
-    url.searchParams.set('subdomain', subdomain)
-
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'x-internal-request': 'true'
-      }
-    })
-
-    if (response.ok) {
-      const data = await response.json()
-      const result = { valid: data.valid, orgId: data.orgId || null }
-
-      // Cache the result
-      subdomainCache.set(subdomain, { ...result, timestamp: Date.now() })
-
-      return result
+function extractSubdomain(hostname: string): string | null {
+  // Handle localhost development (subdomain.localhost or subdomain.localhost:3000)
+  if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
+    const parts = hostname.split('.')
+    if (parts.length >= 2 && parts[0] !== 'localhost' && parts[0] !== '127') {
+      return parts[0]
     }
-  } catch (error) {
-    console.error('Subdomain validation error:', error)
+    return null
   }
 
-  // Default to invalid if we can't validate
-  return { valid: false, orgId: null }
+  // Handle ngrok URLs (subdomain.randomname.ngrok-free.app)
+  if (hostname.includes('ngrok')) {
+    const parts = hostname.split('.')
+    // ngrok format: [subdomain].randomname.ngrok-free.app (5 parts with subdomain)
+    if (parts.length >= 5) {
+      return parts[0]
+    }
+    return null
+  }
+
+  // Production: subdomain.domain.tld
+  const parts = hostname.split('.')
+  if (parts.length >= 3) {
+    const potentialSubdomain = parts[0]
+    if (potentialSubdomain !== 'www' && potentialSubdomain !== 'app') {
+      return potentialSubdomain
+    }
+  }
+
+  return null
 }
 
 export const config = {
